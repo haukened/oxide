@@ -3,22 +3,19 @@
 
 use uefi::prelude::*;
 use uefi::boot;
-use uefi::proto::console::gop::{GraphicsOutput,PixelFormat};
+use uefi::proto::console::gop::{GraphicsOutput, PixelFormat};
 
 #[entry]
 fn efi_main() -> Status {
-    // init allocator, logger, panic handler, and console
     uefi::helpers::init().unwrap();
 
-    // clear the screen
+    // Last use of UEFI text console
     uefi::system::with_stdout(|stdout| {
         stdout.clear().unwrap();
     });
 
-    // draw something persistent. fill screen with GOP
-    if let Err(e) = draw_direct_framebuffer() {
-        // if graphics fails, last-resort try to say something on console
-        uefi::println!("Failed to fill screen with GOP: {:?}", e.status());
+    if let Err(e) = draw_splash() {
+        uefi::println!("Framebuffer draw failed: {:?}", e.status());
         return e.status();
     }
 
@@ -27,8 +24,7 @@ fn efi_main() -> Status {
     }
 }
 
-fn draw_direct_framebuffer() -> uefi::Result {
-    // open the Graphics Output Protocol
+fn draw_splash() -> uefi::Result {
     let gop_handle = boot::get_handle_for_protocol::<GraphicsOutput>()?;
     let mut gop = boot::open_protocol_exclusive::<GraphicsOutput>(gop_handle)?;
 
@@ -40,46 +36,105 @@ fn draw_direct_framebuffer() -> uefi::Result {
     let mut fb = gop.frame_buffer();
     let fb_ptr = fb.as_mut_ptr();
 
-    // we assume 32bpp (true for most UEFI implementations)
-    let bytes_per_pixel = match pixel_format {
-        PixelFormat::Bgr => 4,
-        PixelFormat::Rgb => 4,
-        _ => {
-            return Err(uefi::Status::UNSUPPORTED.into());
-        }
+    let bpp = match pixel_format {
+        PixelFormat::Bgr | PixelFormat::Rgb => 4,
+        _ => return Err(uefi::Status::UNSUPPORTED.into()),
     };
 
-    // draw a simple rectangle so we know orientation and stride are correct
-    let rect_w = width / 4;
-    let rect_h = height / 4;
-    let start_x = (width - rect_w) / 2;
-    let start_y = (height - rect_h) / 2;
+    // --- helpers ------------------------------------------------------------
 
-    for y in 0..rect_h {
-        for x in 0..rect_w {
-            let pixel_x = start_x + x;
-            let pixel_y = start_y + y;
-            let offset = (pixel_y * stride + pixel_x) * bytes_per_pixel;
-            unsafe {
-                let pixel_ptr = fb_ptr.add(offset);
-                // Fill with a solid color (e.g., blue)
-                match pixel_format {
-                    PixelFormat::Bgr => {
-                        *pixel_ptr.add(0) = 0xFF; // Blue
-                        *pixel_ptr.add(1) = 0x00; // Green
-                        *pixel_ptr.add(2) = 0x00; // Red
-                        *pixel_ptr.add(3) = 0x00; 
+    let fill_rect = |x: usize, y: usize, w: usize, h: usize, r: u8, g: u8, b: u8| {
+        for dy in 0..h {
+            for dx in 0..w {
+                let px = x + dx;
+                let py = y + dy;
+                if px >= width || py >= height {
+                    continue;
+                }
+
+                let offset = (py * stride + px) * bpp;
+                unsafe {
+                    let p = fb_ptr.add(offset);
+                    match pixel_format {
+                        PixelFormat::Bgr => {
+                            *p.add(0) = b;
+                            *p.add(1) = g;
+                            *p.add(2) = r;
+                            *p.add(3) = 0;
+                        }
+                        PixelFormat::Rgb => {
+                            *p.add(0) = r;
+                            *p.add(1) = g;
+                            *p.add(2) = b;
+                            *p.add(3) = 0;
+                        }
+                        _ => {}
                     }
-                    PixelFormat::Rgb => {
-                        *pixel_ptr.add(0) = 0x00; // Red
-                        *pixel_ptr.add(1) = 0x00; // Green
-                        *pixel_ptr.add(2) = 0xFF; // Blue
-                        *pixel_ptr.add(3) = 0x00; 
-                    }
-                    _ => {}
                 }
             }
         }
+    };
+
+    // --- background ---------------------------------------------------------
+
+    // Dark gray background
+    fill_rect(0, 0, width, height, 0x20, 0x20, 0x20);
+
+    // --- OXIDE logo ---------------------------------------------------------
+
+    let letter_w = width / 14;
+    let letter_h = height / 6;
+    let thickness = letter_w / 5;
+    let spacing = letter_w / 3;
+
+    let total_w = letter_w * 5 + spacing * 4;
+    let start_x = (width - total_w) / 2;
+    let start_y = (height - letter_h) / 2;
+
+    let rust_color = (0xCE, 0x42, 0x2B);
+
+    let mut x = start_x;
+
+    // O
+    fill_rect(x, start_y, letter_w, thickness, rust_color.0, rust_color.1, rust_color.2);
+    fill_rect(x, start_y + letter_h - thickness, letter_w, thickness, rust_color.0, rust_color.1, rust_color.2);
+    fill_rect(x, start_y, thickness, letter_h, rust_color.0, rust_color.1, rust_color.2);
+    fill_rect(x + letter_w - thickness, start_y, thickness, letter_h, rust_color.0, rust_color.1, rust_color.2);
+    x += letter_w + spacing;
+
+    // X (blocky diagonals, full height)
+    let steps = letter_h / thickness + 1;
+
+    for i in 0..steps {
+        let y = start_y + (i * letter_h) / steps;
+
+        // left-to-right diagonal
+        let x1 = x + (i * letter_w) / steps;
+        fill_rect(x1, y, thickness, thickness, rust_color.0, rust_color.1, rust_color.2);
+
+        // right-to-left diagonal
+        let x2 = x + letter_w - thickness - (i * letter_w) / steps;
+        fill_rect(x2, y, thickness, thickness, rust_color.0, rust_color.1, rust_color.2);
     }
+
+    x += letter_w + spacing;
+
+    // I
+    fill_rect(x + letter_w / 2 - thickness / 2, start_y, thickness, letter_h, rust_color.0, rust_color.1, rust_color.2);
+    x += letter_w + spacing;
+
+    // D
+    fill_rect(x, start_y, thickness, letter_h, rust_color.0, rust_color.1, rust_color.2);
+    fill_rect(x, start_y, letter_w - thickness, thickness, rust_color.0, rust_color.1, rust_color.2);
+    fill_rect(x, start_y + letter_h - thickness, letter_w - thickness, thickness, rust_color.0, rust_color.1, rust_color.2);
+    fill_rect(x + letter_w - thickness, start_y + thickness, thickness, letter_h - 2 * thickness, rust_color.0, rust_color.1, rust_color.2);
+    x += letter_w + spacing;
+
+    // E
+    fill_rect(x, start_y, thickness, letter_h, rust_color.0, rust_color.1, rust_color.2);
+    fill_rect(x, start_y, letter_w, thickness, rust_color.0, rust_color.1, rust_color.2);
+    fill_rect(x, start_y + letter_h / 2 - thickness / 2, letter_w * 3 / 4, thickness, rust_color.0, rust_color.1, rust_color.2);
+    fill_rect(x, start_y + letter_h - thickness, letter_w, thickness, rust_color.0, rust_color.1, rust_color.2);
+
     Ok(())
 }
