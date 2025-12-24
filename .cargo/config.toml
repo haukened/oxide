@@ -1,0 +1,2 @@
+[alias]
+uefi = "build --release --tager x86_64-unknown-uefi"
