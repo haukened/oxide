@@ -4,6 +4,12 @@ applyTo: '**'
 
 # Oxide OS — Project Purpose & Design Intent
 
+## Must follow ADRs
+
+- Regardless of the high-level intent described here, all specific architectural decisions are governed by the project's Architecture Decision Records (ADRs) located in `docs/adr/**`.
+- In case of any conflict between this document and the ADRs, the ADRs take precedence.
+- You must read the ADRs before making any design or implementation decisions.
+
 ## What Oxide Is
 
 Oxide is an experimental operating system written in Rust, targeting modern x86_64 systems using UEFI firmware exclusively.
