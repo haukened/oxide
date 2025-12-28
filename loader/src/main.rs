@@ -3,6 +3,7 @@
 
 use uefi::prelude::*;
 mod framebuffer;
+mod logger;
 
 /// UEFI application entry point
 #[entry]
@@ -23,17 +24,18 @@ fn run() -> uefi::Result<()> {
         stdout.clear().unwrap();
     });
 
-    uefi::println!("oxide-loader: starting");
+    logger::writeln("oxide-loader: starting");
 
-    let _framebuffer_info = framebuffer::init()?;
+    let fb_info = framebuffer::init()?;
 
-    uefi::println!("oxide-loader: framebuffer ready");
+    logger::set_framebuffer_sink(fb_info);
 
-    // Next steps will go here:
-    // - capture memory map
+    logger::writeln("oxide-loader: framebuffer ready");
 
+    let _memory_map = unsafe { uefi::boot::exit_boot_services(None) };
+
+    logger::writeln("oxide-loader: memory map captured");
     // - build BootInfo
-    // - ExitBootServices
     // - jump to kernel
 
     loop {
