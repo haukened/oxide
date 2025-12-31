@@ -1,9 +1,10 @@
 #![no_std]
 #![no_main]
 
+use core::time::Duration;
 use uefi::prelude::*;
+
 mod framebuffer;
-mod logger;
 
 /// UEFI application entry point
 #[entry]
@@ -24,21 +25,48 @@ fn run() -> uefi::Result<()> {
         stdout.clear().unwrap();
     });
 
-    logger::writeln("oxide-loader: starting");
+    // Declare that we are here and alive
+    uefi::println!("Oxide UEFI loader starting...");
 
-    let fb_info = framebuffer::init()?;
+    // Get the framebuffer info for kernel handoff
+    let fb_info = framebuffer::get_framebuffer_info()?;
+    print_framebuffer_info(&fb_info);
 
-    logger::set_framebuffer_sink(fb_info);
+    timed_reboot_for_testing(10);
 
-    logger::writeln("oxide-loader: framebuffer ready");
-
-    let _memory_map = unsafe { uefi::boot::exit_boot_services(None) };
-
-    logger::writeln("oxide-loader: memory map captured");
+    // - memory map / exit boot services
     // - build BootInfo
     // - jump to kernel
 
-    loop {
-        core::hint::spin_loop();
+    //loop {
+    //    core::hint::spin_loop();
+    //}
+}
+
+/// Reboot the system after a countdown, for testing purposes
+/// essential since we don't have power management yet
+fn timed_reboot_for_testing(seconds: u64) -> ! {
+    let dsec = Duration::from_secs(1);
+
+    uefi::println!("Scheduling test reboot in {} seconds", seconds);
+    for i in (1..=seconds).rev() {
+        uefi::print!("\rRebooting in {:>2} ", i);
+        uefi::boot::stall(dsec);
     }
+    uefi::println!("\rRebooting in  0 ");
+    uefi::println!("NOW!");
+
+    // ask for reboot
+    uefi::runtime::reset(uefi::runtime::ResetType(1), uefi::Status::SUCCESS, None);
+}
+
+/// Print framebuffer information to UEFI console
+/// Just for debug, and to keep noise out of the main logic
+fn print_framebuffer_info(fb_info: &framebuffer::FramebufferInfo) {
+    uefi::println!("Framebuffer Info:");
+    uefi::println!("  Base Address: {:p}", fb_info.base_address);
+    uefi::println!("  Buffer Size: {} bytes", fb_info.buffer_size);
+    uefi::println!("  Resolution: {}x{}", fb_info.width, fb_info.height);
+    uefi::println!("  Stride: {}", fb_info.stride);
+    uefi::println!("  Pixel Format: {:?}", fb_info.pixel_format);
 }

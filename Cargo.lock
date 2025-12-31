@@ -28,7 +28,6 @@ version = "0.1.0"
 name = "loader"
 version = "0.1.0"
 dependencies = [
- "log",
  "spleen-font",
  "uefi",
 ]

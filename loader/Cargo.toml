@@ -4,12 +4,5 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-log = "0.4.29"
 spleen-font = { version = "0.2.0", features = ["s8x16"] }
 uefi = { version = "0.36.1", features = ["logger", "panic_handler"] }
-
-[profile.dev]
-panic = "abort"
-
-[profile.release]
-panic = "abort"
