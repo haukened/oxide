@@ -28,7 +28,6 @@ version = "0.1.0"
 name = "loader"
 version = "0.1.0"
 dependencies = [
- "spleen-font",
  "uefi",
 ]
 
@@ -75,12 +74,6 @@ checksum = "a338cc41d27e6cc6dce6cefc13a0729dfbb81c262b1f519331575dd80ef3067f"
 dependencies = [
  "proc-macro2",
 ]
-
-[[package]]
-name = "spleen-font"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43744d8a750592871f6182fd1b9ba6a341d31da3ebf430c9d9d3634d49296600"
 
 [[package]]
 name = "syn"
