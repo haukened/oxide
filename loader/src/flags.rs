@@ -6,20 +6,17 @@ use uefi::{
 use crate::writer::FixedBufWriter;
 
 #[allow(dead_code)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// Boolean flags parsed from the loader command line. Kept minimal for handoff.
 pub struct BootFlags {
     pub debug: bool,
     pub quiet: bool,
 }
 
-impl Default for BootFlags {
-    fn default() -> Self {
-        BootFlags {
-            debug: false,
-            quiet: false,
-        }
-    }
-}
-
+/// Inspect the UEFI load options and extract simple boolean boot flags.
+///
+/// Returns `BootFlags::default()` if options are absent or malformed so the
+/// loader stays resilient to firmware quirks.
 pub fn get_boot_flags() -> BootFlags {
     let image_handle = image_handle();
     let loaded_image = unsafe {
@@ -44,7 +41,10 @@ pub fn get_boot_flags() -> BootFlags {
     let mut buf = [0u8; 256];
     let mut writer = FixedBufWriter::new(&mut buf);
 
-    let _ = opts16.as_str_in_buf(&mut writer);
+    if opts16.as_str_in_buf(&mut writer).is_err() {
+        // truncated or failed conversion; ignore to avoid parsing partial tokens
+        return BootFlags::default();
+    }
     let len = writer.len();
 
     let cmdline = core::str::from_utf8(&buf[..len]).unwrap_or("");
