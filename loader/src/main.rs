@@ -9,6 +9,8 @@ mod flags;
 mod framebuffer;
 mod writer;
 
+const REBOOT_DELAY_SECS: u64 = 10;
+
 /// UEFI application entry point
 #[entry]
 fn efi_main() -> Status {
@@ -25,25 +27,23 @@ fn run() -> uefi::Result<()> {
 
     // Clear UEFI text console for clean logs
     uefi::system::with_stdout(|stdout| {
-        stdout.clear().unwrap();
+        if let Err(err) = stdout.clear() {
+            uefi::print!("stdout.clear() failed: {:?}\n", err);
+        }
     });
 
-    // get firmware info
-    let fw_info = firmware::get_info();
-    let vstr = fw_info.vendor_str();
-    uefi::println!("{} Firmware, Revision: {}", vstr, fw_info.revision);
-
-    // Declare that we are here and alive
     uefi::println!("Oxide UEFI loader starting...");
 
-    // Get the framebuffer info for kernel handoff
+    let fw_info = firmware::get_info();
+    print_firmware_info(&fw_info);
+
     let fb_info = framebuffer::get_framebuffer_info()?;
     print_framebuffer_info(&fb_info);
 
-    // Get boot flags
-    let _boot_flags = flags::get_boot_flags();
+    let boot_flags = flags::get_boot_flags();
+    print_boot_flags(&boot_flags);
 
-    timed_reboot_for_testing(10);
+    timed_reboot_for_testing(REBOOT_DELAY_SECS);
 
     // - memory map / exit boot services
     // - build BootInfo
@@ -80,4 +80,23 @@ fn print_framebuffer_info(fb_info: &framebuffer::FramebufferInfo) {
     uefi::println!("  Resolution: {}x{}", fb_info.width, fb_info.height);
     uefi::println!("  Stride: {}", fb_info.stride);
     uefi::println!("  Pixel Format: {:?}", fb_info.pixel_format);
+}
+
+fn print_firmware_info(info: &firmware::FirmwareInfo) {
+    uefi::println!(
+        "Firmware Info:\n  Vendor: {}{}\n  Revision: {}",
+        info.vendor_str(),
+        if info.vendor_was_truncated() {
+            " (truncated)"
+        } else {
+            ""
+        },
+        info.revision
+    );
+}
+
+fn print_boot_flags(flags: &flags::BootFlags) {
+    uefi::println!("Boot Flags:");
+    uefi::println!("  debug: {}", flags.debug);
+    uefi::println!("  quiet: {}", flags.quiet);
 }
