@@ -6,7 +6,6 @@ use uefi::{
 
 /// Framebuffer information required for kernel handoff.
 #[derive(Clone, Copy, Debug)]
-#[allow(dead_code)]
 pub struct FramebufferInfo {
     /// Raw pointer to the start of the linear framebuffer; valid while the current GOP mode stays active.
     pub base_address: *mut u8,
@@ -20,8 +19,8 @@ pub struct FramebufferInfo {
 /// Project-owned pixel format wrapper so UEFI types stay contained.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FramebufferPixelFormat {
-    RGB,
-    BGR,
+    Rgb,
+    Bgr,
 }
 
 /// Acquire framebuffer metadata without taking exclusive GOP ownership.
@@ -59,8 +58,8 @@ pub fn get_framebuffer_info() -> uefi::Result<FramebufferInfo> {
 
 fn map_pixel_format(format: PixelFormat) -> uefi::Result<FramebufferPixelFormat> {
     match format {
-        PixelFormat::Rgb => Ok(FramebufferPixelFormat::RGB),
-        PixelFormat::Bgr => Ok(FramebufferPixelFormat::BGR),
+        PixelFormat::Rgb => Ok(FramebufferPixelFormat::Rgb),
+        PixelFormat::Bgr => Ok(FramebufferPixelFormat::Bgr),
         _ => Err(Status::UNSUPPORTED.into()),
     }
 }
