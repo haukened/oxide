@@ -1,5 +1,7 @@
 use uefi::system;
 
+use crate::writer::FixedBufWriter;
+
 #[allow(dead_code)]
 pub struct FirmwareInfo {
     pub revision: u32,
@@ -34,32 +36,4 @@ fn copy_vendor_string(vendor: &uefi::CStr16) -> ([u8; 63], u8) {
     let len = writer.len() as u8;
 
     (buf, len)
-}
-
-struct FixedBufWriter<'a> {
-    buf: &'a mut [u8],
-    len: usize,
-}
-
-impl<'a> FixedBufWriter<'a> {
-    fn new(buf: &'a mut [u8]) -> Self {
-        FixedBufWriter { buf, len: 0 }
-    }
-
-    fn len(&self) -> usize {
-        self.len
-    }
-}
-
-impl<'a> core::fmt::Write for FixedBufWriter<'a> {
-    fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        let bytes = s.as_bytes();
-        let remaining = self.buf.len() - self.len;
-        let to_copy = bytes.len().min(remaining);
-
-        self.buf[self.len..self.len + to_copy].copy_from_slice(&bytes[..to_copy]);
-        self.len += to_copy;
-
-        Ok(())
-    }
 }
