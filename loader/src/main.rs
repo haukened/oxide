@@ -4,6 +4,7 @@
 use core::time::Duration;
 use uefi::prelude::*;
 
+mod firmware;
 mod framebuffer;
 
 /// UEFI application entry point
@@ -24,6 +25,11 @@ fn run() -> uefi::Result<()> {
     uefi::system::with_stdout(|stdout| {
         stdout.clear().unwrap();
     });
+
+    // get firmware info
+    let fw_info = firmware::get_info();
+    let vstr = fw_info.vendor_str();
+    uefi::println!("{} Firmware, Revision: {}", vstr, fw_info.revision);
 
     // Declare that we are here and alive
     uefi::println!("Oxide UEFI loader starting...");

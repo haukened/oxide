@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 uefi = { version = "0.36.1", features = ["logger", "panic_handler"] }
+arrayvec = { version = "0.7", default-features = false }
