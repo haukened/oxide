@@ -5,7 +5,9 @@ use core::time::Duration;
 use uefi::prelude::*;
 
 mod firmware;
+mod flags;
 mod framebuffer;
+mod writer;
 
 /// UEFI application entry point
 #[entry]
@@ -37,6 +39,9 @@ fn run() -> uefi::Result<()> {
     // Get the framebuffer info for kernel handoff
     let fb_info = framebuffer::get_framebuffer_info()?;
     print_framebuffer_info(&fb_info);
+
+    // Get boot flags
+    let _boot_flags = flags::get_boot_flags();
 
     timed_reboot_for_testing(10);
 
