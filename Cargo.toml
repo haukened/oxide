@@ -1,7 +1,7 @@
 [workspace]
 members = [
   "loader",
-  "kernel",
+  "kernel", "abi",
 ]
 resolver = "3"
 
