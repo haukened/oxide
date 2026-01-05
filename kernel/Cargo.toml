@@ -3,6 +3,10 @@ name = "oxide-kernel"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = ["standalone"]
+standalone = []
+
 [lib]
 crate-type = ["rlib"]
 test = false
