@@ -2,6 +2,8 @@
 
 /// the static version of the ABI
 pub const ABI_VERSION: u32 = 1;
+/// Maximum number of bytes in the firmware vendor string.
+pub const ABI_VENDOR_CAP: usize = 32;
 
 /// Shared ABI between the UEFI loader and Oxide kernel.
 #[repr(C)]
