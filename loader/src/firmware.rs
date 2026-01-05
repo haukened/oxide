@@ -1,4 +1,5 @@
 use crate::writer::FixedBufWriter;
+use oxide_abi::{ABI_VENDOR_CAP, Firmware};
 use uefi::system;
 
 /// Maximum number of UTF-8 bytes we capture from the firmware vendor string.
@@ -23,6 +24,23 @@ impl FirmwareInfo {
     /// True when the vendor string exceeded our fixed buffer and had to be truncated.
     pub fn vendor_was_truncated(&self) -> bool {
         self.vendor_truncated
+    }
+}
+
+/// Convert internal FirmwareInfo to ABI Firmware struct for handoff.
+impl From<FirmwareInfo> for Firmware {
+    fn from(info: FirmwareInfo) -> Self {
+        let mut vendor = [0u8; ABI_VENDOR_CAP];
+
+        let len = info.vendor_len.min(ABI_VENDOR_CAP);
+        vendor[..len].copy_from_slice(&info.vendor[..len]);
+
+        Firmware {
+            revision: info.revision,
+            vendor,
+            vendor_len: len as u8,
+            vendor_truncated: info.vendor_truncated as u8,
+        }
     }
 }
 
