@@ -95,7 +95,7 @@ pub struct Framebuffer {
     /// Height in pixels.
     pub height: u32,
     /// Number of pixels per scanline.
-    pub stride: u32,
+    pub pixels_per_scanline: u32,
     /// Pixel format.
     pub pixel_format: PixelFormat,
 }
