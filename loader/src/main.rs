@@ -3,6 +3,7 @@
 
 use uefi::prelude::*;
 
+mod abi;
 mod firmware;
 mod flags;
 mod framebuffer;
