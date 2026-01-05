@@ -1,9 +1,9 @@
+use crate::writer::FixedBufWriter;
+use oxide_abi::Options;
 use uefi::{
     boot::{OpenProtocolAttributes, OpenProtocolParams, image_handle, open_protocol},
     proto::loaded_image::LoadedImage,
 };
-
-use crate::writer::FixedBufWriter;
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -11,6 +11,16 @@ use crate::writer::FixedBufWriter;
 pub struct BootOptions {
     pub debug: bool,
     pub quiet: bool,
+}
+
+/// Convert to ABI Options representation.
+impl From<BootOptions> for Options {
+    fn from(opts: BootOptions) -> Self {
+        Options {
+            debug: if opts.debug { 1 } else { 0 },
+            quiet: if opts.quiet { 1 } else { 0 },
+        }
+    }
 }
 
 /// Inspect the UEFI load options and extract simple boolean boot options.
