@@ -106,7 +106,8 @@ pub struct MemoryDescriptor {
     pub typ: u32,
     /// Padding for 8-byte alignment.
     pub _pad: u32,
-    /// Physical start address of the region.
+    /// Physical start address of the region, identity-mapped at entry
+    /// Virtual Address == Physical Address when passed to the kernel.
     pub physical_start: u64,
     /// The number of 4 KiB pages in the region.
     pub number_of_pages: u64,
