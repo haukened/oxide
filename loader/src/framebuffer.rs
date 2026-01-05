@@ -1,3 +1,4 @@
+use oxide_abi::Framebuffer;
 use uefi::{
     Status,
     boot::{self, OpenProtocolAttributes, OpenProtocolParams},
@@ -7,13 +8,36 @@ use uefi::{
 /// Framebuffer information required for kernel handoff.
 #[derive(Clone, Copy, Debug)]
 pub struct FramebufferInfo {
-    /// Raw pointer to the start of the linear framebuffer; valid while the current GOP mode stays active.
+    /// raw pointer to the framebuffer base address
+    /// Must be identity-mapped at Virtual Address == Physical Address
+    /// the loader must not change GOP mode after getting this from the UEFI.
     pub base_address: *mut u8,
     pub buffer_size: usize,
     pub width: usize,
     pub height: usize,
-    pub stride: usize,
+    pub pixels_per_scanline: usize,
     pub pixel_format: FramebufferPixelFormat,
+}
+
+/// Convert to ABI Framebuffer representation.
+impl From<FramebufferInfo> for Framebuffer {
+    fn from(fb: FramebufferInfo) -> Self {
+        debug_assert!(fb.width <= u32::MAX as usize);
+        debug_assert!(fb.height <= u32::MAX as usize);
+        debug_assert!(fb.pixels_per_scanline <= u32::MAX as usize);
+        Framebuffer {
+            base_address: fb.base_address as u64,
+            buffer_size: fb.buffer_size as u64,
+            width: fb.width as u32,
+            height: fb.height as u32,
+            // Pixels per scanline
+            pixels_per_scanline: fb.pixels_per_scanline as u32,
+            pixel_format: match fb.pixel_format {
+                FramebufferPixelFormat::Rgb => oxide_abi::PixelFormat::Rgb,
+                FramebufferPixelFormat::Bgr => oxide_abi::PixelFormat::Bgr,
+            },
+        }
+    }
 }
 
 /// Project-owned pixel format wrapper so UEFI types stay contained.
@@ -44,14 +68,14 @@ pub fn get_framebuffer_info() -> uefi::Result<FramebufferInfo> {
     let buffer_size = fb.size();
     let info = gop.current_mode_info();
     let (width, height) = info.resolution();
-    let stride = info.stride();
+    let pixels_per_scanline = info.stride();
     let pixel_format = map_pixel_format(info.pixel_format())?;
     Ok(FramebufferInfo {
         base_address,
         buffer_size,
         width,
         height,
-        stride,
+        pixels_per_scanline,
         pixel_format,
     })
 }
