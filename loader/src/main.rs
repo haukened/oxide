@@ -50,7 +50,4 @@ fn run() -> uefi::Result<()> {
 
     // - jump to kernel
     kernel_main(boot_abi as *const _);
-
-    // should never return
-    unreachable!();
 }
