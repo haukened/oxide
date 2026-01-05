@@ -1,6 +1,11 @@
 use core::mem::{MaybeUninit, size_of};
 use oxide_abi::BootAbi;
-use uefi::boot::{AllocateType, MemoryType, allocate_pages};
+use uefi::{
+    boot::{AllocateType, MemoryType, allocate_pages},
+    mem::memory_map::{MemoryMap, MemoryMapOwned},
+};
+
+use crate::{firmware::FirmwareInfo, framebuffer::FramebufferInfo, options::BootOptions};
 
 /// Allocates the BootAbi in LOADER_DATA memory.
 ///
@@ -32,5 +37,58 @@ pub fn alloc_abi_struct() -> uefi::Result<*mut BootAbi> {
         abi.version = oxide_abi::ABI_VERSION;
 
         Ok(abi)
+    }
+}
+
+/// Convert UEFI MemoryMapOwned to ABI MemoryMap representation.
+fn convert_memory_map(mem: MemoryMapOwned) -> oxide_abi::MemoryMap {
+    let meta = mem.meta();
+    let buf = mem.buffer();
+
+    let abi = oxide_abi::MemoryMap {
+        // Physical address of the memory descriptors.
+        descriptors_phys: buf.as_ptr() as u64,
+        // use buf.len() instead of meta.map_size to reflect actual buffer size
+        map_size: buf.len() as u64,
+        // The reported memory descriptor size.
+        entry_size: meta.desc_size as u32,
+        // the version of the descriptor structure
+        entry_version: meta.desc_version as u32,
+        // number of keys in the map
+        entry_count: mem.len() as u32,
+    };
+
+    core::mem::forget(mem);
+
+    abi
+}
+
+/// Safe code to build the BootAbi structure.
+fn build_boot_abi(
+    abi: &mut BootAbi,
+    fw: FirmwareInfo,
+    fb: FramebufferInfo,
+    options: BootOptions,
+    mem: MemoryMapOwned,
+) {
+    abi.firmware = fw.into();
+    abi.framebuffer = fb.into();
+    abi.options = options.into();
+    abi.memory_map = convert_memory_map(mem);
+}
+
+/// Unsafe wrapper to build BootAbi from raw pointer.
+/// Since we're lying to the borrow checker, caller must ensure pointer validity.
+/// But lie in one place and don't infect the safe wrapper.
+pub fn build_boot_abi_from_ptr(
+    abi_ptr: *mut BootAbi,
+    fw: FirmwareInfo,
+    fb: FramebufferInfo,
+    options: BootOptions,
+    mem: MemoryMapOwned,
+) {
+    unsafe {
+        let abi = &mut *abi_ptr;
+        build_boot_abi(abi, fw, fb, options, mem);
     }
 }
