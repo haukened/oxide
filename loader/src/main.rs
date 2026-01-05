@@ -1,12 +1,13 @@
 #![no_std]
 #![no_main]
 
+use oxide_kernel::kernel_main;
 use uefi::prelude::*;
 
 mod abi;
 mod firmware;
-mod flags;
 mod framebuffer;
+mod options;
 mod writer;
 
 /// UEFI application entry point
@@ -33,20 +34,23 @@ fn run() -> uefi::Result<()> {
     uefi::println!("Oxide UEFI loader starting...");
 
     // pre-allocate memory for the ABI structures we need to build, before exit boot services
+    let boot_abi = abi::alloc_abi_struct()?;
 
-    let _fw_info = firmware::get_info();
+    let fw_info = firmware::get_info();
 
-    let _fb_info = framebuffer::get_framebuffer_info()?;
+    let fb_info = framebuffer::get_framebuffer_info()?;
 
-    let _boot_flags = flags::get_boot_flags();
+    let boot_options = options::get_boot_options();
 
     // Here we exit boot services, so we lose all UEFI services after this point
-    let _mem_map = unsafe { uefi::boot::exit_boot_services(None) };
+    let mem_map = unsafe { uefi::boot::exit_boot_services(None) };
 
     // - build BootAbi
-    // - jump to kernel
+    abi::build_boot_abi_from_ptr(boot_abi, fw_info, fb_info, boot_options, mem_map);
 
-    loop {
-        core::hint::spin_loop();
-    }
+    // - jump to kernel
+    kernel_main(boot_abi as *const _);
+
+    // should never return
+    unreachable!();
 }
