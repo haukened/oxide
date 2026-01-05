@@ -1,15 +1,12 @@
 #![no_std]
 #![no_main]
 
-use core::time::Duration;
 use uefi::prelude::*;
 
 mod firmware;
 mod flags;
 mod framebuffer;
 mod writer;
-
-const REBOOT_DELAY_SECS: u64 = 10;
 
 /// UEFI application entry point
 #[entry]
