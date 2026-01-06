@@ -1,4 +1,4 @@
-use core::cmp::min;
+use core::{cmp::min, ptr};
 use oxide_abi::{Framebuffer, PixelFormat};
 
 use super::{FONT_HEIGHT, FONT_WIDTH, glyph_for};
@@ -34,8 +34,8 @@ pub struct FramebufferSurface {
     pub pixel_format: PixelFormat,
 }
 
-impl From<Framebuffer> for FramebufferSurface {
-    fn from(fb: Framebuffer) -> Self {
+impl FramebufferSurface {
+    pub fn new(fb: Framebuffer) -> Result<Self, ()> {
         Self {
             base_ptr: fb.base_address as *mut u32,
             pitch: fb.pixels_per_scanline as usize,
@@ -43,6 +43,24 @@ impl From<Framebuffer> for FramebufferSurface {
             height: fb.height as usize,
             pixel_format: fb.pixel_format,
         }
+        .validate()
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            base_ptr: ptr::null_mut(),
+            pitch: 0,
+            width: 0,
+            height: 0,
+            pixel_format: PixelFormat::Rgb,
+        }
+    }
+
+    pub fn validate(self) -> Result<Self, ()> {
+        if self.base_ptr.is_null() || self.pitch == 0 || self.width == 0 || self.height == 0 {
+            return Err(());
+        }
+        Ok(self)
     }
 }
 
@@ -52,17 +70,7 @@ impl From<Framebuffer> for FramebufferSurface {
 /// If the framebuffer geometry does not fit within the reported buffer,
 /// it returns `Err(())` and performs no writes.
 pub fn clear_black(fb: &Framebuffer) -> Result<(), ()> {
-    if fb.base_address == 0 {
-        return Err(());
-    }
-
-    let pitch = fb.pixels_per_scanline as usize;
-    let width = fb.width as usize;
-    let height = fb.height as usize;
-
-    if pitch == 0 || width == 0 || height == 0 {
-        return Err(());
-    }
+    let surface = FramebufferSurface::new(*fb)?;
 
     let bytes_per_pixel = core::mem::size_of::<u32>();
     let max_pixels = (fb.buffer_size as usize) / bytes_per_pixel;
@@ -71,24 +79,22 @@ pub fn clear_black(fb: &Framebuffer) -> Result<(), ()> {
     }
 
     // Limit clearing to what actually fits in the buffer
-    let max_rows = max_pixels / pitch;
-    let clear_height = min(height, max_rows);
+    let max_rows = max_pixels / surface.pitch;
+    let clear_height = min(surface.height, max_rows);
     if clear_height == 0 {
         return Err(());
     }
 
-    let row_width = min(width, pitch);
+    let row_width = min(surface.width, surface.pitch);
     if row_width == 0 {
         return Err(());
     }
 
-    let color = encode_pixel(fb.pixel_format, FramebufferColor::BLACK);
-
-    let base_ptr = fb.base_address as *mut u32;
+    let color = encode_pixel(surface.pixel_format, FramebufferColor::BLACK);
 
     unsafe {
         for y in 0..clear_height {
-            let row_ptr = base_ptr.add(y * pitch);
+            let row_ptr = surface.base_ptr.add(y * surface.pitch);
             for x in 0..row_width {
                 row_ptr.add(x).write_volatile(color);
             }
@@ -106,17 +112,11 @@ pub fn draw_glyph(
     byte: u8,
     color: FramebufferColor,
 ) -> Result<(), ()> {
-    if surface.base_ptr.is_null() {
-        return Err(());
-    }
+    let surface = surface.validate()?;
 
     let pitch = surface.pitch;
     let width = surface.width;
     let height = surface.height;
-
-    if pitch == 0 || width == 0 || height == 0 {
-        return Err(());
-    }
 
     if start_x >= width || start_y >= height {
         return Err(());

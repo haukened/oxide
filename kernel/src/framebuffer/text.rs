@@ -28,7 +28,7 @@ pub struct FramebufferConsole {
 
 impl FramebufferConsole {
     pub fn new(fb: Framebuffer, origin_x: usize, origin_y: usize, color: FramebufferColor) -> Self {
-        let surface = FramebufferSurface::from(fb);
+        let surface = FramebufferSurface::new(fb).unwrap_or_else(|_| FramebufferSurface::empty());
         let viewport = Viewport::new(surface, origin_x, origin_y);
 
         Self {
