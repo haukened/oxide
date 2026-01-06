@@ -1,8 +1,7 @@
 use core::ptr;
 
-use crate::fb_println;
 use crate::memory::frame::{FRAME_SIZE, FrameAllocator, UsableFrameIter};
-use crate::memory::map::{MemoryMapIter, descriptor_range, find_descriptor_containing};
+use crate::memory::map::{descriptor_range, find_descriptor_containing};
 use crate::memory::paging::{PagingError, install_identity_paging};
 use oxide_abi::{Framebuffer, MemoryMap};
 
@@ -12,16 +11,12 @@ pub fn initialize(
     memory_map: &MemoryMap,
     framebuffer: &Framebuffer,
 ) -> Result<(), MemoryInitError> {
-    for desc in MemoryMapIter::new(memory_map) {
-        let _ = desc.physical_start;
-    }
-    fb_println!("Memory map parsed successfully.");
+    crate::fb_diagln!("Initializing memory subsystem...");
 
     if UsableFrameIter::new(memory_map).next().is_none() {
-        fb_println!("No usable memory frames found.");
+        crate::fb_println!("No usable memory frames found.");
         return Err(MemoryInitError::NoUsableMemory);
     }
-    fb_println!("Found usable memory frames.");
 
     let mut allocator = FrameAllocator::new(memory_map);
 
@@ -30,7 +25,7 @@ pub fn initialize(
         phys_range: map_copy_range,
     } = copy_memory_map(memory_map, &mut allocator)?;
 
-    fb_println!("Memory map copied successfully.");
+    crate::fb_diagln!("Memory map copied successfully.");
 
     let _ = kernel_memory_map;
 
@@ -38,7 +33,7 @@ pub fn initialize(
     unsafe {
         core::arch::asm!("mov {}, rsp", out(reg) rsp);
     }
-    fb_println!("Current RSP: {:#x}", rsp);
+    crate::fb_diagln!("Current RSP: {:#x}", rsp);
 
     let loader_descriptor = find_descriptor_containing(memory_map, rsp)
         .ok_or(MemoryInitError::StackDescriptorMissing(rsp))?;
@@ -48,7 +43,7 @@ pub fn initialize(
     let (stack_start, stack_end) = descriptor_range(loader_descriptor)
         .ok_or(MemoryInitError::StackRangeOverflow(descriptor_type))?;
 
-    fb_println!(
+    crate::fb_diagln!(
         "Preserving memory map copy range [{:#x}, {:#x}]",
         (map_copy_range.0),
         (map_copy_range.1)
@@ -72,13 +67,13 @@ pub fn initialize(
             identity_ranges[identity_len] = range;
             identity_len += 1;
         } else {
-            fb_println!("IDENTITY RANGE OVERFLOW WHILE STAGING PAGING.");
+            crate::fb_diagln!("IDENTITY RANGE OVERFLOW WHILE STAGING PAGING.");
         }
     };
 
     push_range(map_copy_range);
 
-    fb_println!(
+    crate::fb_diagln!(
         "Preserving loader stack type {:#x} range [{:#x}, {:#x}]",
         descriptor_type,
         stack_start,
@@ -89,7 +84,7 @@ pub fn initialize(
     let code_addr = initialize as usize as u64;
     if let Some(code_desc) = find_descriptor_containing(memory_map, code_addr) {
         if let Some((code_start, code_end)) = descriptor_range(code_desc) {
-            fb_println!(
+            crate::fb_diagln!(
                 "Preserving kernel code type {:#x} range [{:#x}, {:#x}]",
                 (code_desc.typ),
                 code_start,
@@ -98,7 +93,7 @@ pub fn initialize(
             push_range((code_start, code_end));
         }
     } else {
-        fb_println!(
+        crate::fb_println!(
             "WARNING: KERNEL CODE ADDRESS {:#x} MISSING FROM MEMORY MAP.",
             code_addr
         );
@@ -110,7 +105,7 @@ pub fn initialize(
         let aligned_start = start & !(crate::memory::paging::HUGE_PAGE_SIZE - 1);
         let aligned_end = (end + crate::memory::paging::HUGE_PAGE_SIZE - 1)
             & !(crate::memory::paging::HUGE_PAGE_SIZE - 1);
-        fb_println!(
+        crate::fb_diagln!(
             "Mapping identity range [{:#x}, {:#x}] aligned to [{:#x}, {:#x}]",
             start,
             end,
@@ -124,7 +119,7 @@ pub fn initialize(
             .map_err(MemoryInitError::Paging)?;
     }
 
-    fb_println!("Identity paging installed.");
+    crate::fb_diagln!("Identity paging installed.");
 
     Ok(())
 }
