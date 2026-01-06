@@ -1,18 +1,13 @@
-#![allow(unused_imports)]
-#![allow(dead_code)]
 use oxide_abi::Framebuffer;
 
-mod boot;
 mod draw;
 mod font;
 mod text;
 
 use core::fmt;
 
-pub use boot::BootStage;
-pub use draw::{FramebufferColor, draw_glyph};
+pub use draw::FramebufferColor;
 pub use font::{FONT_HEIGHT, FONT_WIDTH, glyph_for};
-pub use text::{FramebufferConsole, draw_char, draw_text};
 
 use core::cell::UnsafeCell;
 
@@ -56,23 +51,4 @@ macro_rules! fb_println {
 
 pub fn clear_framebuffer(fb: &Framebuffer) -> Result<(), ()> {
     draw::clear_black(fb)
-}
-
-pub fn draw_rect(
-    fb: &Framebuffer,
-    start_x: usize,
-    start_y: usize,
-    size_x: usize,
-    size_y: usize,
-    color: FramebufferColor,
-) -> Result<(), ()> {
-    draw::draw_rect(fb, start_x, start_y, size_x, size_y, color)
-}
-
-pub fn panic_screen(fb: &Framebuffer) -> ! {
-    draw::panic_screen(fb);
-}
-
-pub fn draw_boot_stage(fb: &Framebuffer, stage: boot::BootStage) {
-    boot::draw_boot_stage(fb, stage);
 }

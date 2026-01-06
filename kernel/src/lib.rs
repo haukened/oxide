@@ -3,13 +3,7 @@
 
 use oxide_abi::BootAbi;
 
-use crate::{
-    framebuffer::BootStage,
-    memory::{
-        frame::{FrameAllocator, UsableFrameIter},
-        map::MemoryMapIter,
-    },
-};
+use crate::memory::init;
 
 mod framebuffer;
 mod memory;
@@ -29,39 +23,52 @@ pub extern "C" fn kernel_main(boot_abi_ptr: *const BootAbi) -> ! {
 
     // SAFETY: caller (the UEFI loader) must ensure the pointer is valid at entry
     let boot_abi = unsafe { &*boot_abi_ptr };
-    let fb = &boot_abi.framebuffer;
+    let framebuffer = boot_abi.framebuffer;
+    let memory_map = boot_abi.memory_map;
 
     // Clear the framebuffer to assert control
-    framebuffer::clear_framebuffer(fb).expect("framebuffer clear failed");
+    framebuffer::clear_framebuffer(&framebuffer).expect("framebuffer clear failed");
 
-    // Draw a boot marker to indicate that the kernel has started
-    framebuffer::draw_boot_stage(fb, BootStage::EnteredKernel);
-
-    // Ensure we can parse the memory map
-    let mem_map = &boot_abi.memory_map;
-    for desc in MemoryMapIter::new(mem_map) {
-        // For now, just a dummy operation to use the descriptor
-        let _ = desc.physical_start;
-    }
-    framebuffer::draw_boot_stage(fb, BootStage::ParsedMemoryMap);
-
-    // Ensure we can find usable memory frames
-    if UsableFrameIter::new(mem_map).next().is_some() {
-        framebuffer::draw_boot_stage(fb, BootStage::FoundUsableMemory);
-    } else {
-        framebuffer::panic_screen(fb);
+    unsafe {
+        framebuffer::init_boot_console(framebuffer, framebuffer::FramebufferColor::WHITE);
     }
 
-    // Ensure we can allocate a frame
-    let mut alloc = FrameAllocator::new(mem_map);
-    if let Some(_frame) = alloc.allocate_frame() {
-        framebuffer::draw_boot_stage(fb, BootStage::FrameAllocated);
-    } else {
-        framebuffer::panic_screen(fb);
+    fb_println!("Oxide kernel starting...");
+
+    if let Err(err) = init::initialize(&memory_map, &framebuffer) {
+        log_memory_failure(err);
+        loop {
+            core::hint::spin_loop();
+        }
     }
+
+    fb_println!("Memory subsystem initialized.");
 
     loop {
         core::hint::spin_loop();
+    }
+}
+
+fn log_memory_failure(err: init::MemoryInitError) {
+    match err {
+        init::MemoryInitError::NoUsableMemory => fb_println!("No usable memory frames found."),
+        init::MemoryInitError::EmptyMemoryMap => fb_println!("Memory map is empty."),
+        init::MemoryInitError::OutOfFrames => {
+            fb_println!("Out of frames while copying memory map.")
+        }
+        init::MemoryInitError::NonContiguous => {
+            fb_println!("Failed to allocate contiguous frames for memory map copy.")
+        }
+        init::MemoryInitError::TooLarge => fb_println!("Memory map too large to copy."),
+        init::MemoryInitError::StackDescriptorMissing(addr) => {
+            fb_println!("No memory descriptor covers stack address {:#x}", addr)
+        }
+        init::MemoryInitError::StackRangeOverflow(typ) => {
+            fb_println!("Stack descriptor range overflow for type {:#x}", typ)
+        }
+        init::MemoryInitError::Paging(err) => {
+            fb_println!("install_identity_paging failed: {:?}", err)
+        }
     }
 }
 

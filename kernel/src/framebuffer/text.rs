@@ -27,34 +27,6 @@ pub fn draw_char(
     draw::draw_glyph(fb, start_x, start_y, b, color)
 }
 
-pub fn draw_text(
-    fb: &Framebuffer,
-    start_x: usize,
-    start_y: usize,
-    text: &str,
-    color: FramebufferColor,
-) -> Result<(), ()> {
-    let mut x = start_x;
-    let mut y = start_y;
-    let row_stride = FONT_HEIGHT + LINE_SPACING;
-    for byte in text.bytes() {
-        match byte {
-            b'\n' => {
-                x = start_x;
-                y = y.saturating_add(row_stride);
-            }
-            b'\r' => {
-                x = start_x;
-            }
-            _ => {
-                draw_char(fb, x, y, byte, color)?;
-                x = x.saturating_add(FONT_WIDTH);
-            }
-        }
-    }
-    Ok(())
-}
-
 pub struct FramebufferConsole {
     fb: Framebuffer,
     origin_x: usize,

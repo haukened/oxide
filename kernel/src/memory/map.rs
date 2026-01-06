@@ -1,3 +1,4 @@
+use crate::memory::frame::FRAME_SIZE;
 use oxide_abi::{MemoryDescriptor, MemoryMap};
 
 pub struct MemoryMapIter<'a> {
@@ -16,6 +17,26 @@ impl<'a> MemoryMapIter<'a> {
             _marker: core::marker::PhantomData,
         }
     }
+}
+
+pub fn descriptor_range(desc: &MemoryDescriptor) -> Option<(u64, u64)> {
+    let len = desc.number_of_pages.checked_mul(FRAME_SIZE)?;
+    let end = desc.physical_start.checked_add(len)?;
+    Some((desc.physical_start, end))
+}
+
+pub fn find_descriptor_containing<'a>(
+    map: &'a MemoryMap,
+    addr: u64,
+) -> Option<&'a MemoryDescriptor> {
+    for desc in MemoryMapIter::new(map) {
+        if let Some((start, end)) = descriptor_range(desc) {
+            if addr >= start && addr < end {
+                return Some(desc);
+            }
+        }
+    }
+    None
 }
 
 impl<'a> Iterator for MemoryMapIter<'a> {

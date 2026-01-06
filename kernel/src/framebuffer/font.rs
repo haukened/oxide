@@ -27,8 +27,23 @@ const GLYPH_DOT: [u8; FONT_HEIGHT] = double_rows([
 const GLYPH_COLON: [u8; FONT_HEIGHT] = double_rows([
     0b00000000, 0b00011000, 0b00011000, 0b00000000, 0b00000000, 0b00011000, 0b00011000, 0b00000000,
 ]);
+const GLYPH_COMMA: [u8; FONT_HEIGHT] = double_rows([
+    0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00011000, 0b00011000, 0b00110000,
+]);
 const GLYPH_QUESTION: [u8; FONT_HEIGHT] = double_rows([
     0b00111100, 0b01100110, 0b00000110, 0b00001100, 0b00011000, 0b00000000, 0b00011000, 0b00011000,
+]);
+const GLYPH_LPAREN: [u8; FONT_HEIGHT] = double_rows([
+    0b00001110, 0b00011000, 0b00110000, 0b00110000, 0b00110000, 0b00011000, 0b00001110, 0b00000000,
+]);
+const GLYPH_RPAREN: [u8; FONT_HEIGHT] = double_rows([
+    0b01110000, 0b00110000, 0b00011000, 0b00011000, 0b00011000, 0b00110000, 0b01110000, 0b00000000,
+]);
+const GLYPH_LBRACKET: [u8; FONT_HEIGHT] = double_rows([
+    0b00011110, 0b00011000, 0b00011000, 0b00011000, 0b00011000, 0b00011000, 0b00011000, 0b00011110,
+]);
+const GLYPH_RBRACKET: [u8; FONT_HEIGHT] = double_rows([
+    0b00011110, 0b00000110, 0b00000110, 0b00000110, 0b00000110, 0b00000110, 0b00000110, 0b00011110,
 ]);
 
 const GLYPH_0: [u8; FONT_HEIGHT] = double_rows([
@@ -180,7 +195,12 @@ pub fn glyph_for(byte: u8) -> &'static [u8; FONT_HEIGHT] {
         b'Y' | b'y' => &GLYPH_Y,
         b'Z' | b'z' => &GLYPH_Z,
         b':' => &GLYPH_COLON,
+        b',' => &GLYPH_COMMA,
         b'.' => &GLYPH_DOT,
+        b'(' => &GLYPH_LPAREN,
+        b')' => &GLYPH_RPAREN,
+        b'[' => &GLYPH_LBRACKET,
+        b']' => &GLYPH_RBRACKET,
         b'?' => &GLYPH_QUESTION,
         b' ' => &GLYPH_BLANK,
         _ => &GLYPH_QUESTION,
