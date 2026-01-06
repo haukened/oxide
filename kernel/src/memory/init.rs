@@ -2,7 +2,7 @@ use core::ptr;
 
 use crate::memory::frame::{FRAME_SIZE, FrameAllocator, UsableFrameIter};
 use crate::memory::map::{descriptor_range, find_descriptor_containing};
-use crate::memory::paging::{PagingError, install_identity_paging};
+use crate::memory::paging::{HUGE_PAGE_SIZE, PagingError, install_identity_paging};
 use oxide_abi::{Framebuffer, MemoryMap};
 
 const LOW_IDENTITY_LIMIT: u64 = 1 * 1024 * 1024 * 1024; // 1 GiB
@@ -55,16 +55,18 @@ impl IdentityRanges {
     }
 }
 
+struct StackInfo {
+    descriptor_type: u32,
+    range: (u64, u64),
+}
+
 pub fn initialize(
     memory_map: &MemoryMap,
     framebuffer: &Framebuffer,
 ) -> Result<(), MemoryInitError> {
-    crate::fb_diagln!("Initializing memory subsystem...");
+    crate::fb_println!("Initializing memory subsystem...");
 
-    if UsableFrameIter::new(memory_map).next().is_none() {
-        crate::fb_println!("No usable memory frames found.");
-        return Err(MemoryInitError::NoUsableMemory);
-    }
+    ensure_usable_memory(memory_map)?;
 
     let mut allocator = FrameAllocator::new(memory_map);
 
@@ -75,21 +77,13 @@ pub fn initialize(
 
     crate::fb_diagln!("Memory map copied successfully.");
 
+    // supress warning until we have a consumer
     let _ = kernel_memory_map;
 
-    let mut rsp: u64;
-    unsafe {
-        core::arch::asm!("mov {}, rsp", out(reg) rsp);
-    }
+    let rsp = current_stack_pointer();
     crate::fb_diagln!("Current RSP: {:#x}", rsp);
 
-    let loader_descriptor = find_descriptor_containing(memory_map, rsp)
-        .ok_or(MemoryInitError::StackDescriptorMissing(rsp))?;
-
-    let descriptor_type = loader_descriptor.typ;
-
-    let (stack_start, stack_end) = descriptor_range(loader_descriptor)
-        .ok_or(MemoryInitError::StackRangeOverflow(descriptor_type))?;
+    let stack_info = loader_stack_info(memory_map, rsp)?;
 
     crate::fb_diagln!(
         "Preserving memory map copy range [{:#x}, {:#x}]",
@@ -98,28 +92,29 @@ pub fn initialize(
     );
 
     let mut identity_ranges = IdentityRanges::new();
-
     identity_ranges.push(map_copy_range)?;
 
+    let stack_type = stack_info.descriptor_type;
+    let (stack_start, stack_end) = stack_info.range;
     crate::fb_diagln!(
         "Preserving loader stack type {:#x} range [{:#x}, {:#x}]",
-        descriptor_type,
+        stack_type,
         stack_start,
         stack_end
     );
     identity_ranges.push((stack_start, stack_end))?;
 
     let code_addr = initialize as usize as u64;
-    if let Some(code_desc) = find_descriptor_containing(memory_map, code_addr) {
-        if let Some((code_start, code_end)) = descriptor_range(code_desc) {
-            crate::fb_diagln!(
-                "Preserving kernel code type {:#x} range [{:#x}, {:#x}]",
-                (code_desc.typ),
-                code_start,
-                code_end
-            );
-            identity_ranges.push((code_start, code_end))?;
-        }
+    if let Some(((code_start, code_end), code_type)) =
+        kernel_code_identity_range(memory_map, code_addr)
+    {
+        crate::fb_diagln!(
+            "Preserving kernel code type {:#x} range [{:#x}, {:#x}]",
+            code_type,
+            code_start,
+            code_end
+        );
+        identity_ranges.push((code_start, code_end))?;
     } else {
         crate::fb_println!(
             "WARNING: KERNEL CODE ADDRESS {:#x} MISSING FROM MEMORY MAP.",
@@ -129,18 +124,7 @@ pub fn initialize(
 
     let ranges = identity_ranges.as_slice();
 
-    for &(start, end) in ranges {
-        let aligned_start = start & !(crate::memory::paging::HUGE_PAGE_SIZE - 1);
-        let aligned_end = (end + crate::memory::paging::HUGE_PAGE_SIZE - 1)
-            & !(crate::memory::paging::HUGE_PAGE_SIZE - 1);
-        crate::fb_diagln!(
-            "Mapping identity range [{:#x}, {:#x}] aligned to [{:#x}, {:#x}]",
-            start,
-            end,
-            aligned_start,
-            aligned_end
-        );
-    }
+    log_identity_alignment(ranges);
 
     unsafe {
         install_identity_paging(&mut allocator, framebuffer, LOW_IDENTITY_LIMIT, ranges)
@@ -149,6 +133,7 @@ pub fn initialize(
 
     crate::fb_diagln!("Identity paging installed.");
 
+    crate::fb_println!("Memory subsystem initialization complete.");
     Ok(())
 }
 
@@ -217,4 +202,56 @@ fn copy_memory_map(
         map,
         phys_range: (first, phys_end),
     })
+}
+
+fn ensure_usable_memory(memory_map: &MemoryMap) -> Result<(), MemoryInitError> {
+    if UsableFrameIter::new(memory_map).next().is_some() {
+        Ok(())
+    } else {
+        crate::fb_println!("No usable memory frames found.");
+        Err(MemoryInitError::NoUsableMemory)
+    }
+}
+
+fn current_stack_pointer() -> u64 {
+    let mut rsp: u64;
+    unsafe {
+        core::arch::asm!("mov {}, rsp", out(reg) rsp);
+    }
+    rsp
+}
+
+fn loader_stack_info(memory_map: &MemoryMap, rsp: u64) -> Result<StackInfo, MemoryInitError> {
+    let descriptor = find_descriptor_containing(memory_map, rsp)
+        .ok_or(MemoryInitError::StackDescriptorMissing(rsp))?;
+
+    let descriptor_type = descriptor.typ;
+
+    let range =
+        descriptor_range(descriptor).ok_or(MemoryInitError::StackRangeOverflow(descriptor_type))?;
+
+    Ok(StackInfo {
+        descriptor_type,
+        range,
+    })
+}
+
+fn kernel_code_identity_range(memory_map: &MemoryMap, code_addr: u64) -> Option<((u64, u64), u32)> {
+    let descriptor = find_descriptor_containing(memory_map, code_addr)?;
+    let range = descriptor_range(descriptor)?;
+    Some((range, descriptor.typ))
+}
+
+fn log_identity_alignment(ranges: &[(u64, u64)]) {
+    for &(start, end) in ranges {
+        let aligned_start = start & !(HUGE_PAGE_SIZE - 1);
+        let aligned_end = (end + HUGE_PAGE_SIZE - 1) & !(HUGE_PAGE_SIZE - 1);
+        crate::fb_diagln!(
+            "Mapping identity range [{:#x}, {:#x}] aligned to [{:#x}, {:#x}]",
+            start,
+            end,
+            aligned_start,
+            aligned_end
+        );
+    }
 }
