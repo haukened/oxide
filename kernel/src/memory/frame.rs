@@ -4,6 +4,23 @@ use oxide_abi::{EfiMemoryType, MemoryMap};
 /// Size of a physical memory frame in bytes (4 KiB).
 pub const FRAME_SIZE: u64 = 4096;
 
+pub struct FrameAllocator<'a> {
+    iter: UsableFrameIter<'a>,
+}
+
+impl<'a> FrameAllocator<'a> {
+    pub fn new(map: &'a MemoryMap) -> Self {
+        Self {
+            iter: UsableFrameIter::new(map),
+        }
+    }
+
+    /// Allocate a single physical memory frame.
+    pub fn allocate_frame(&mut self) -> Option<u64> {
+        self.iter.next()
+    }
+}
+
 pub struct UsableFrameIter<'a> {
     desc_iter: MemoryMapIter<'a>,
     current_range: Option<(u64, u64)>, // [start, end)

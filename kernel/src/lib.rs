@@ -5,7 +5,10 @@ use oxide_abi::BootAbi;
 
 use crate::{
     framebuffer::BootStage,
-    memory::{frame::UsableFrameIter, map::MemoryMapIter},
+    memory::{
+        frame::{self, FrameAllocator, UsableFrameIter},
+        map::MemoryMapIter,
+    },
 };
 
 mod framebuffer;
@@ -34,24 +37,25 @@ pub extern "C" fn kernel_main(boot_abi_ptr: *const BootAbi) -> ! {
     // Draw a boot marker to indicate that the kernel has started
     framebuffer::draw_boot_stage(fb, BootStage::EnteredKernel);
 
+    // Ensure we can parse the memory map
     let mem_map = &boot_abi.memory_map;
     for desc in MemoryMapIter::new(mem_map) {
         // For now, just a dummy operation to use the descriptor
         let _ = desc.physical_start;
     }
-
     framebuffer::draw_boot_stage(fb, BootStage::ParsedMemoryMap);
 
-    let mut found = false;
-    for frame in UsableFrameIter::new(mem_map) {
-        let _ = frame;
-        // For now, just a dummy operation to use the frame
-        found = true;
-        break;
+    // Ensure we can find usable memory frames
+    if UsableFrameIter::new(mem_map).next().is_some() {
+        framebuffer::draw_boot_stage(fb, BootStage::FoundUsableMemory);
+    } else {
+        framebuffer::panic_screen(fb);
     }
 
-    if found {
-        framebuffer::draw_boot_stage(fb, BootStage::FoundUsableMemory);
+    // Ensure we can allocate a frame
+    let mut alloc = FrameAllocator::new(mem_map);
+    if let Some(_frame) = alloc.allocate_frame() {
+        framebuffer::draw_boot_stage(fb, BootStage::FrameAllocated);
     } else {
         framebuffer::panic_screen(fb);
     }

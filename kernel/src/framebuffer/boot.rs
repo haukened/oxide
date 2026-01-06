@@ -10,7 +10,8 @@ pub enum BootStage {
     EnteredKernel = 0,
     ParsedMemoryMap = 1,
     FoundUsableMemory = 2,
-    PagingEnabled = 3,
+    FrameAllocated = 3,
+    PagingEnabled = 4,
     // add more as needed
 }
 
@@ -19,7 +20,8 @@ fn boot_stage_color(stage: BootStage) -> FramebufferColor {
         BootStage::EnteredKernel => FramebufferColor::RED,
         BootStage::ParsedMemoryMap => FramebufferColor::ORANGE,
         BootStage::FoundUsableMemory => FramebufferColor::YELLOW,
-        BootStage::PagingEnabled => FramebufferColor::GREEN,
+        BootStage::FrameAllocated => FramebufferColor::GREEN,
+        BootStage::PagingEnabled => FramebufferColor::BLUE,
     }
 }
 
