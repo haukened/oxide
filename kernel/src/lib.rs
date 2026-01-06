@@ -32,8 +32,10 @@ pub extern "C" fn kernel_main(boot_abi_ptr: *const BootAbi) -> ! {
     // Clear the framebuffer to assert control
     framebuffer::clear_framebuffer(&framebuffer).expect("framebuffer clear failed");
 
-    unsafe {
-        framebuffer::init_boot_console(framebuffer, framebuffer::FramebufferColor::WHITE);
+    if unsafe { framebuffer::init_boot_console(framebuffer, framebuffer::FramebufferColor::WHITE) }
+        .is_err()
+    {
+        // No usable console; subsequent fb_* macros become no-ops.
     }
 
     crate::fb_diagln!("Oxide kernel starting...");

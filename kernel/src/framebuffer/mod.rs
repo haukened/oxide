@@ -17,11 +17,18 @@ unsafe impl Sync for ConsoleCell {}
 
 static BOOT_CONSOLE_STORAGE: ConsoleCell = ConsoleCell(UnsafeCell::new(None));
 
-pub unsafe fn init_boot_console(fb: Framebuffer, color: FramebufferColor) {
-    unsafe {
-        *BOOT_CONSOLE_STORAGE.0.get() =
-            Some(text::FramebufferConsole::new(fb, 0, FONT_HEIGHT, color));
+pub unsafe fn init_boot_console(fb: Framebuffer, color: FramebufferColor) -> Result<(), ()> {
+    let console = text::FramebufferConsole::new(fb, 0, FONT_HEIGHT, color);
+
+    if !console.is_usable() {
+        return Err(());
     }
+
+    unsafe {
+        *BOOT_CONSOLE_STORAGE.0.get() = Some(console);
+    }
+
+    Ok(())
 }
 
 pub(crate) fn console_write(args: fmt::Arguments<'_>) {

@@ -63,6 +63,10 @@ impl FramebufferConsole {
         }
     }
 
+    pub fn is_usable(&self) -> bool {
+        self.max_cols > 0 && self.max_rows > 0
+    }
+
     fn newline(&mut self) {
         self.cursor_col = 0;
         if self.cursor_row + 1 < self.max_rows {
