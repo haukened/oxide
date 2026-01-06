@@ -7,6 +7,7 @@ use crate::memory::init;
 
 mod framebuffer;
 mod memory;
+mod options;
 
 /// Kernel entry point called from the UEFI loader.
 ///
@@ -26,6 +27,8 @@ pub extern "C" fn kernel_main(boot_abi_ptr: *const BootAbi) -> ! {
     let framebuffer = boot_abi.framebuffer;
     let memory_map = boot_abi.memory_map;
 
+    options::init(boot_abi.options);
+
     // Clear the framebuffer to assert control
     framebuffer::clear_framebuffer(&framebuffer).expect("framebuffer clear failed");
 
@@ -33,7 +36,7 @@ pub extern "C" fn kernel_main(boot_abi_ptr: *const BootAbi) -> ! {
         framebuffer::init_boot_console(framebuffer, framebuffer::FramebufferColor::WHITE);
     }
 
-    fb_println!("Oxide kernel starting...");
+    crate::fb_diagln!("Oxide kernel starting...");
 
     if let Err(err) = init::initialize(&memory_map, &framebuffer) {
         log_memory_failure(err);
@@ -42,7 +45,7 @@ pub extern "C" fn kernel_main(boot_abi_ptr: *const BootAbi) -> ! {
         }
     }
 
-    fb_println!("Memory subsystem initialized.");
+    crate::fb_diagln!("Memory subsystem initialized.");
 
     loop {
         core::hint::spin_loop();
@@ -51,23 +54,25 @@ pub extern "C" fn kernel_main(boot_abi_ptr: *const BootAbi) -> ! {
 
 fn log_memory_failure(err: init::MemoryInitError) {
     match err {
-        init::MemoryInitError::NoUsableMemory => fb_println!("No usable memory frames found."),
-        init::MemoryInitError::EmptyMemoryMap => fb_println!("Memory map is empty."),
+        init::MemoryInitError::NoUsableMemory => {
+            crate::fb_println!("No usable memory frames found.")
+        }
+        init::MemoryInitError::EmptyMemoryMap => crate::fb_println!("Memory map is empty."),
         init::MemoryInitError::OutOfFrames => {
-            fb_println!("Out of frames while copying memory map.")
+            crate::fb_println!("Out of frames while copying memory map.")
         }
         init::MemoryInitError::NonContiguous => {
-            fb_println!("Failed to allocate contiguous frames for memory map copy.")
+            crate::fb_println!("Failed to allocate contiguous frames for memory map copy.")
         }
-        init::MemoryInitError::TooLarge => fb_println!("Memory map too large to copy."),
+        init::MemoryInitError::TooLarge => crate::fb_println!("Memory map too large to copy."),
         init::MemoryInitError::StackDescriptorMissing(addr) => {
-            fb_println!("No memory descriptor covers stack address {:#x}", addr)
+            crate::fb_println!("No memory descriptor covers stack address {:#x}", addr)
         }
         init::MemoryInitError::StackRangeOverflow(typ) => {
-            fb_println!("Stack descriptor range overflow for type {:#x}", typ)
+            crate::fb_println!("Stack descriptor range overflow for type {:#x}", typ)
         }
         init::MemoryInitError::Paging(err) => {
-            fb_println!("install_identity_paging failed: {:?}", err)
+            crate::fb_println!("install_identity_paging failed: {:?}", err)
         }
     }
 }
