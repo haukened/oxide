@@ -6,7 +6,7 @@ use oxide_abi::BootAbi;
 use crate::{
     framebuffer::BootStage,
     memory::{
-        frame::{self, FrameAllocator, UsableFrameIter},
+        frame::{FrameAllocator, UsableFrameIter},
         map::MemoryMapIter,
     },
 };
