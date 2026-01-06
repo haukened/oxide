@@ -1,6 +1,55 @@
 use core::cmp::min;
 use oxide_abi::{Framebuffer, PixelFormat};
 
+/// Simple RGB color helper for framebuffer drawing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FramebufferColor {
+    r: u8,
+    g: u8,
+    b: u8,
+}
+
+/// Fill the entire framebuffer with a panic indicator color.
+pub fn panic_screen(fb: &Framebuffer) -> ! {
+    let width = fb.width as usize;
+    let height = fb.height as usize;
+
+    // if the firmware didn't lie, try to fill the screen with red
+    if width > 0 && height > 0 {
+        let _ = draw_rect(fb, 0, 0, width, height, FramebufferColor::RED);
+    }
+
+    // halt
+    loop {
+        core::hint::spin_loop();
+    }
+}
+
+#[allow(dead_code)]
+impl FramebufferColor {
+    pub const fn new(r: u8, g: u8, b: u8) -> Self {
+        Self { r, g, b }
+    }
+
+    pub const BLACK: Self = Self::new(0x00, 0x00, 0x00);
+    pub const WHITE: Self = Self::new(0xFF, 0xFF, 0xFF);
+    pub const RED: Self = Self::new(0xFF, 0x00, 0x00);
+    pub const ORANGE: Self = Self::new(0xFF, 0xA5, 0x00);
+    pub const YELLOW: Self = Self::new(0xFF, 0xFF, 0x00);
+    pub const GREEN: Self = Self::new(0x00, 0x80, 0x00);
+    pub const BLUE: Self = Self::new(0x00, 0x00, 0xFF);
+    pub const INDIGO: Self = Self::new(0x4B, 0x00, 0x82);
+    pub const VIOLET: Self = Self::new(0x8A, 0x2B, 0xE2);
+
+    /// Convenience constructors for additive color combos.
+    pub const CYAN: Self = Self::new(0x00, 0xFF, 0xFF);
+    pub const MAGENTA: Self = Self::new(0xFF, 0x00, 0xFF);
+
+    pub const fn components(self) -> (u8, u8, u8) {
+        (self.r, self.g, self.b)
+    }
+}
+
 /// Clear the framebuffer to black.
 ///
 /// This function is defensive against malformed firmware data.
@@ -32,8 +81,10 @@ pub fn clear_black(fb: &Framebuffer) -> Result<(), ()> {
         return Err(());
     }
 
+    let (r, g, b) = FramebufferColor::BLACK.components();
     let color = match fb.pixel_format {
-        PixelFormat::Rgb | PixelFormat::Bgr => u32::from_le_bytes([0x00, 0x00, 0x00, 0xFF]),
+        PixelFormat::Rgb => u32::from_le_bytes([r, g, b, 0xFF]),
+        PixelFormat::Bgr => u32::from_le_bytes([b, g, r, 0xFF]),
     };
 
     let base_ptr = fb.base_address as *mut u32;
@@ -50,8 +101,15 @@ pub fn clear_black(fb: &Framebuffer) -> Result<(), ()> {
     Ok(())
 }
 
-/// Draw a boot marker (a small rectangle) in the top-left corner of the framebuffer.
-pub fn draw_boot_marker(fb: &Framebuffer) -> Result<(), ()> {
+/// Draw a solid rectangle at the given framebuffer coordinates.
+pub fn draw_rect(
+    fb: &Framebuffer,
+    start_x: usize,
+    start_y: usize,
+    size_x: usize,
+    size_y: usize,
+    color: FramebufferColor,
+) -> Result<(), ()> {
     if fb.base_address == 0 {
         return Err(());
     }
@@ -64,40 +122,60 @@ pub fn draw_boot_marker(fb: &Framebuffer) -> Result<(), ()> {
         return Err(());
     }
 
+    if size_x == 0 || size_y == 0 {
+        return Err(());
+    }
+
+    if start_x >= width || start_y >= height {
+        return Err(());
+    }
+
+    let draw_width = min(size_x, width - start_x);
+    let draw_height = min(size_y, height - start_y);
+    if draw_width == 0 || draw_height == 0 {
+        return Err(());
+    }
+
+    let row_span = start_x.checked_add(draw_width).ok_or(())?;
+    if row_span > pitch {
+        return Err(());
+    }
+
     let bytes_per_pixel = core::mem::size_of::<u32>();
     let max_pixels = (fb.buffer_size as usize) / bytes_per_pixel;
     if max_pixels == 0 {
         return Err(());
     }
 
-    const MARKER_SIZE: usize = 64;
-    let draw_width = min(width, min(pitch, MARKER_SIZE));
-    let draw_height = min(height, MARKER_SIZE);
-    if draw_width == 0 || draw_height == 0 {
-        return Err(());
-    }
-
-    // Verify the marker fits within the buffer
-    let last_row = draw_height.checked_sub(1).ok_or(())?;
-    let row_offset = last_row.checked_mul(pitch).ok_or(())?;
-    let last_col = draw_width.checked_sub(1).ok_or(())?;
-    let last_index = row_offset.checked_add(last_col).ok_or(())?;
+    let last_row = start_y
+        .checked_add(draw_height)
+        .and_then(|v| v.checked_sub(1))
+        .ok_or(())?;
+    let last_col = start_x
+        .checked_add(draw_width)
+        .and_then(|v| v.checked_sub(1))
+        .ok_or(())?;
+    let last_index = last_row
+        .checked_mul(pitch)
+        .and_then(|row| row.checked_add(last_col))
+        .ok_or(())?;
     if last_index >= max_pixels {
         return Err(());
     }
 
-    let color = match fb.pixel_format {
-        PixelFormat::Rgb => u32::from_le_bytes([0xFF, 0x40, 0x20, 0xFF]),
-        PixelFormat::Bgr => u32::from_le_bytes([0x20, 0x40, 0xFF, 0xFF]),
+    let (r, g, b) = color.components();
+    let pixel = match fb.pixel_format {
+        PixelFormat::Rgb => u32::from_le_bytes([r, g, b, 0xFF]),
+        PixelFormat::Bgr => u32::from_le_bytes([b, g, r, 0xFF]),
     };
 
     let base_ptr = fb.base_address as *mut u32;
 
     unsafe {
         for y in 0..draw_height {
-            let row_ptr = base_ptr.add(y * pitch);
+            let row_ptr = base_ptr.add((start_y + y) * pitch + start_x);
             for x in 0..draw_width {
-                row_ptr.add(x).write_volatile(color);
+                row_ptr.add(x).write_volatile(pixel);
             }
         }
     }
