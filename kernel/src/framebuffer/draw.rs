@@ -24,6 +24,28 @@ impl FramebufferColor {
     }
 }
 
+/// Minimal viewport over the firmware-provided framebuffer.
+#[derive(Clone, Copy, Debug)]
+pub struct FramebufferSurface {
+    pub base_ptr: *mut u32,
+    pub pitch: usize,
+    pub width: usize,
+    pub height: usize,
+    pub pixel_format: PixelFormat,
+}
+
+impl From<Framebuffer> for FramebufferSurface {
+    fn from(fb: Framebuffer) -> Self {
+        Self {
+            base_ptr: fb.base_address as *mut u32,
+            pitch: fb.pixels_per_scanline as usize,
+            width: fb.width as usize,
+            height: fb.height as usize,
+            pixel_format: fb.pixel_format,
+        }
+    }
+}
+
 /// Clear the framebuffer to black.
 ///
 /// This function is defensive against malformed firmware data.
@@ -78,19 +100,19 @@ pub fn clear_black(fb: &Framebuffer) -> Result<(), ()> {
 
 /// Draw a single glyph bitmap at the given framebuffer coordinates.
 pub fn draw_glyph(
-    fb: &Framebuffer,
+    surface: FramebufferSurface,
     start_x: usize,
     start_y: usize,
     byte: u8,
     color: FramebufferColor,
 ) -> Result<(), ()> {
-    if fb.base_address == 0 {
+    if surface.base_ptr.is_null() {
         return Err(());
     }
 
-    let pitch = fb.pixels_per_scanline as usize;
-    let width = fb.width as usize;
-    let height = fb.height as usize;
+    let pitch = surface.pitch;
+    let width = surface.width;
+    let height = surface.height;
 
     if pitch == 0 || width == 0 || height == 0 {
         return Err(());
@@ -114,14 +136,12 @@ pub fn draw_glyph(
         return Err(());
     }
 
-    let pixel = encode_pixel(fb.pixel_format, color);
-
-    let base_ptr = fb.base_address as *mut u32;
+    let pixel = encode_pixel(surface.pixel_format, color);
 
     unsafe {
         for row in 0..draw_height {
             let bitmap_row = glyph[row];
-            let row_ptr = base_ptr.add((start_y + row) * pitch + start_x);
+            let row_ptr = surface.base_ptr.add((start_y + row) * pitch + start_x);
             for col in 0..draw_width {
                 let bit = FONT_WIDTH - 1 - col;
                 if (bitmap_row >> bit) & 1 == 1 {
