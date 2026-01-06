@@ -1,11 +1,14 @@
 use core::ptr;
 
-use crate::memory::frame::{FRAME_SIZE, FrameAllocator, UsableFrameIter};
+use crate::memory::frame::{FRAME_SIZE, FrameAllocError, FrameAllocator, UsableFrameIter};
 use crate::memory::map::{descriptor_range, find_descriptor_containing};
 use crate::memory::paging::{HUGE_PAGE_SIZE, PagingError, install_identity_paging};
 use oxide_abi::{Framebuffer, MemoryMap};
 
 const LOW_IDENTITY_LIMIT: u64 = 1 * 1024 * 1024 * 1024; // 1 GiB
+/// Identity ranges are limited because the install path only needs a few
+/// critical regions (map copy, stack, kernel image, occasional extras).
+/// This keeps the staging structure stack-allocated with predictable size.
 const MAX_IDENTITY_RANGES: usize = 4;
 
 struct IdentityRanges {
@@ -64,7 +67,7 @@ pub fn initialize(
     memory_map: &MemoryMap,
     framebuffer: &Framebuffer,
 ) -> Result<(), MemoryInitError> {
-    crate::fb_println!("Initializing memory subsystem...");
+    crate::fb_diagln!("Initializing memory subsystem...");
 
     ensure_usable_memory(memory_map)?;
 
@@ -77,7 +80,7 @@ pub fn initialize(
 
     crate::fb_diagln!("Memory map copied successfully.");
 
-    // supress warning until we have a consumer
+    // suppress warning until we have a consumer
     let _ = kernel_memory_map;
 
     let rsp = current_stack_pointer();
@@ -96,12 +99,14 @@ pub fn initialize(
 
     let stack_type = stack_info.descriptor_type;
     let (stack_start, stack_end) = stack_info.range;
+
     crate::fb_diagln!(
         "Preserving loader stack type {:#x} range [{:#x}, {:#x}]",
         stack_type,
         stack_start,
         stack_end
     );
+
     identity_ranges.push((stack_start, stack_end))?;
 
     let code_addr = initialize as usize as u64;
@@ -174,16 +179,20 @@ fn copy_memory_map(
         return Err(MemoryInitError::EmptyMemoryMap);
     }
 
-    let first = alloc.alloc().ok_or(MemoryInitError::OutOfFrames)?;
-    let mut prev = first;
-
-    for _ in 1..frame_count {
-        let next = alloc.alloc().ok_or(MemoryInitError::OutOfFrames)?;
-        if next != prev + FRAME_SIZE {
-            return Err(MemoryInitError::NonContiguous);
-        }
-        prev = next;
-    }
+    let first = alloc
+        .alloc_contiguous(frame_count)
+        .map_err(|err| match err {
+            FrameAllocError::OutOfFrames => MemoryInitError::OutOfFrames,
+            FrameAllocError::NonContiguous { expected, found } => {
+                crate::fb_println!(
+                    "Frame allocator produced non-contiguous sequence: expected {:#x}, found {:#x}",
+                    expected,
+                    found
+                );
+                MemoryInitError::NonContiguous
+            }
+            FrameAllocError::InvalidRequest => MemoryInitError::EmptyMemoryMap,
+        })?;
 
     let copy_bytes = map_size as usize;
     let dest_ptr = first as *mut u8;

@@ -4,6 +4,13 @@ use oxide_abi::{EfiMemoryType, MemoryMap};
 /// Size of a physical memory frame in bytes (4 KiB).
 pub const FRAME_SIZE: u64 = 4096;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FrameAllocError {
+    OutOfFrames,
+    NonContiguous { expected: u64, found: u64 },
+    InvalidRequest,
+}
+
 pub struct FrameAllocator<'a> {
     iter: UsableFrameIter<'a>,
 }
@@ -18,6 +25,31 @@ impl<'a> FrameAllocator<'a> {
     /// Allocate a single physical memory frame.
     pub fn alloc(&mut self) -> Option<u64> {
         self.iter.next()
+    }
+
+    /// Allocate `frame_count` contiguous frames, returning the physical start address.
+    pub fn alloc_contiguous(&mut self, frame_count: usize) -> Result<u64, FrameAllocError> {
+        debug_assert!(frame_count > 0);
+        if frame_count == 0 {
+            return Err(FrameAllocError::InvalidRequest);
+        }
+
+        let first = self.alloc().ok_or(FrameAllocError::OutOfFrames)?;
+        let mut prev = first;
+
+        for _ in 1..frame_count {
+            let next = self.alloc().ok_or(FrameAllocError::OutOfFrames)?;
+            let expected = prev + FRAME_SIZE;
+            if next != expected {
+                return Err(FrameAllocError::NonContiguous {
+                    expected,
+                    found: next,
+                });
+            }
+            prev = next;
+        }
+
+        Ok(first)
     }
 }
 
