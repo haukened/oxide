@@ -31,36 +31,52 @@ pub unsafe fn init_boot_console(fb: Framebuffer, color: FramebufferColor) -> Res
     Ok(())
 }
 
-pub(crate) fn console_write(args: fmt::Arguments<'_>) {
+pub(crate) fn console_write(args: fmt::Arguments<'_>) -> fmt::Result {
     unsafe {
-        if let Some(console) = (*BOOT_CONSOLE_STORAGE.0.get()).as_mut() {
-            let _ = fmt::Write::write_fmt(console, args);
+        let storage = &mut *BOOT_CONSOLE_STORAGE.0.get();
+        let result = match storage.as_mut() {
+            Some(console) => fmt::Write::write_fmt(console, args),
+            None => Err(fmt::Error),
+        };
+
+        if result.is_err() {
+            *storage = None;
         }
+
+        result
     }
 }
 
 #[macro_export]
 macro_rules! fb_print {
     ($($arg:tt)*) => {
-        $crate::framebuffer::console_write(core::format_args!($($arg)*))
+        {
+            let _ = $crate::framebuffer::console_write(core::format_args!($($arg)*));
+        }
     };
 }
 
 #[macro_export]
 macro_rules! fb_println {
     () => {
-        $crate::framebuffer::console_write(core::format_args!("\n"))
+        {
+            let _ = $crate::framebuffer::console_write(core::format_args!("\n"));
+        }
     };
     ($fmt:expr $(, $arg:tt)*) => {
-        $crate::framebuffer::console_write(core::format_args!(concat!($fmt, "\n") $(, $arg)*))
+        {
+            let _ = $crate::framebuffer::console_write(core::format_args!(concat!($fmt, "\n") $(, $arg)*));
+        }
     };
 }
 
 #[macro_export]
 macro_rules! fb_diag {
     ($($arg:tt)*) => {
-        if $crate::options::diagnostics_enabled() {
-            $crate::framebuffer::console_write(core::format_args!($($arg)*));
+        {
+            if $crate::options::diagnostics_enabled() {
+                let _ = $crate::framebuffer::console_write(core::format_args!($($arg)*));
+            }
         }
     };
 }
@@ -68,13 +84,17 @@ macro_rules! fb_diag {
 #[macro_export]
 macro_rules! fb_diagln {
     () => {
-        if $crate::options::diagnostics_enabled() {
-            $crate::framebuffer::console_write(core::format_args!("\n"));
+        {
+            if $crate::options::diagnostics_enabled() {
+                let _ = $crate::framebuffer::console_write(core::format_args!("\n"));
+            }
         }
     };
     ($fmt:expr $(, $arg:tt)*) => {
-        if $crate::options::diagnostics_enabled() {
-            $crate::framebuffer::console_write(core::format_args!(concat!($fmt, "\n") $(, $arg)*));
+        {
+            if $crate::options::diagnostics_enabled() {
+                let _ = $crate::framebuffer::console_write(core::format_args!(concat!($fmt, "\n") $(, $arg)*));
+            }
         }
     };
 }
