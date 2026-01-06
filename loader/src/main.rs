@@ -35,10 +35,19 @@ fn run() -> uefi::Result<()> {
 
     // pre-allocate memory for the ABI structures we need to build, before exit boot services
     let boot_abi = abi::alloc_abi_struct()?;
+    uefi::println!("Allocated BootAbi at {:p}", boot_abi);
 
     let fw_info = firmware::get_info();
 
     let fb_info = framebuffer::get_framebuffer_info()?;
+    uefi::println!(
+        "Framebuffer: \n  addr={:#?}\n  size={} bytes\n  {}x{}, {} bpp",
+        fb_info.base_address,
+        fb_info.buffer_size,
+        fb_info.width,
+        fb_info.height,
+        fb_info.pixels_per_scanline * 8 / fb_info.width
+    );
 
     let boot_options = options::get_boot_options();
 
