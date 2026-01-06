@@ -16,7 +16,7 @@ impl<'a> FrameAllocator<'a> {
     }
 
     /// Allocate a single physical memory frame.
-    pub fn allocate_frame(&mut self) -> Option<u64> {
+    pub fn alloc(&mut self) -> Option<u64> {
         self.iter.next()
     }
 }
