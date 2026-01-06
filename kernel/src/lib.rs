@@ -73,6 +73,13 @@ fn log_memory_failure(err: init::MemoryInitError) {
         init::MemoryInitError::StackRangeOverflow(typ) => {
             crate::fb_println!("Stack descriptor range overflow for type {:#x}", typ)
         }
+        init::MemoryInitError::IdentityRangeOverflow { start, end } => {
+            crate::fb_println!(
+                "Identity range staging overflowed while adding [{:#x}, {:#x}]",
+                start,
+                end
+            )
+        }
         init::MemoryInitError::Paging(err) => {
             crate::fb_println!("install_identity_paging failed: {:?}", err)
         }

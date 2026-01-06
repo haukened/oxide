@@ -6,6 +6,54 @@ use crate::memory::paging::{PagingError, install_identity_paging};
 use oxide_abi::{Framebuffer, MemoryMap};
 
 const LOW_IDENTITY_LIMIT: u64 = 1 * 1024 * 1024 * 1024; // 1 GiB
+const MAX_IDENTITY_RANGES: usize = 4;
+
+struct IdentityRanges {
+    entries: [(u64, u64); MAX_IDENTITY_RANGES],
+    len: usize,
+}
+
+impl IdentityRanges {
+    fn new() -> Self {
+        Self {
+            entries: [(0, 0); MAX_IDENTITY_RANGES],
+            len: 0,
+        }
+    }
+
+    fn push(&mut self, range: (u64, u64)) -> Result<(), MemoryInitError> {
+        if range.0 >= range.1 {
+            return Ok(());
+        }
+
+        if self.entries[..self.len]
+            .iter()
+            .any(|&existing| existing == range)
+        {
+            return Ok(());
+        }
+
+        if self.len >= MAX_IDENTITY_RANGES {
+            crate::fb_diagln!(
+                "IDENTITY RANGE CAP HIT WHILE STAGING [{:#x}, {:#x}]",
+                (range.0),
+                (range.1)
+            );
+            return Err(MemoryInitError::IdentityRangeOverflow {
+                start: range.0,
+                end: range.1,
+            });
+        }
+
+        self.entries[self.len] = range;
+        self.len += 1;
+        Ok(())
+    }
+
+    fn as_slice(&self) -> &[(u64, u64)] {
+        &self.entries[..self.len]
+    }
+}
 
 pub fn initialize(
     memory_map: &MemoryMap,
@@ -49,29 +97,9 @@ pub fn initialize(
         (map_copy_range.1)
     );
 
-    const MAX_IDENTITY_RANGES: usize = 4;
-    let mut identity_ranges = [(0u64, 0u64); MAX_IDENTITY_RANGES];
-    let mut identity_len = 0usize;
+    let mut identity_ranges = IdentityRanges::new();
 
-    let mut push_range = |range: (u64, u64)| {
-        if range.0 >= range.1 {
-            return;
-        }
-        if identity_ranges[..identity_len]
-            .iter()
-            .any(|&(start, end)| start == range.0 && end == range.1)
-        {
-            return;
-        }
-        if identity_len < MAX_IDENTITY_RANGES {
-            identity_ranges[identity_len] = range;
-            identity_len += 1;
-        } else {
-            crate::fb_diagln!("IDENTITY RANGE OVERFLOW WHILE STAGING PAGING.");
-        }
-    };
-
-    push_range(map_copy_range);
+    identity_ranges.push(map_copy_range)?;
 
     crate::fb_diagln!(
         "Preserving loader stack type {:#x} range [{:#x}, {:#x}]",
@@ -79,7 +107,7 @@ pub fn initialize(
         stack_start,
         stack_end
     );
-    push_range((stack_start, stack_end));
+    identity_ranges.push((stack_start, stack_end))?;
 
     let code_addr = initialize as usize as u64;
     if let Some(code_desc) = find_descriptor_containing(memory_map, code_addr) {
@@ -90,7 +118,7 @@ pub fn initialize(
                 code_start,
                 code_end
             );
-            push_range((code_start, code_end));
+            identity_ranges.push((code_start, code_end))?;
         }
     } else {
         crate::fb_println!(
@@ -99,7 +127,7 @@ pub fn initialize(
         );
     }
 
-    let ranges = &identity_ranges[..identity_len];
+    let ranges = identity_ranges.as_slice();
 
     for &(start, end) in ranges {
         let aligned_start = start & !(crate::memory::paging::HUGE_PAGE_SIZE - 1);
@@ -133,6 +161,7 @@ pub enum MemoryInitError {
     TooLarge,
     StackDescriptorMissing(u64),
     StackRangeOverflow(u32),
+    IdentityRangeOverflow { start: u64, end: u64 },
     Paging(PagingError),
 }
 
