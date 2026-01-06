@@ -55,18 +55,19 @@ pub fn clear_black(fb: &Framebuffer) -> Result<(), ()> {
         return Err(());
     }
 
-    let (r, g, b) = FramebufferColor::BLACK.components();
-    let color = match fb.pixel_format {
-        PixelFormat::Rgb => u32::from_le_bytes([r, g, b, 0xFF]),
-        PixelFormat::Bgr => u32::from_le_bytes([b, g, r, 0xFF]),
-    };
+    let row_width = min(width, pitch);
+    if row_width == 0 {
+        return Err(());
+    }
+
+    let color = encode_pixel(fb.pixel_format, FramebufferColor::BLACK);
 
     let base_ptr = fb.base_address as *mut u32;
 
     unsafe {
         for y in 0..clear_height {
             let row_ptr = base_ptr.add(y * pitch);
-            for x in 0..width {
+            for x in 0..row_width {
                 row_ptr.add(x).write_volatile(color);
             }
         }
@@ -99,19 +100,21 @@ pub fn draw_glyph(
         return Err(());
     }
 
+    if start_x >= pitch {
+        return Err(());
+    }
+
     let glyph = glyph_for(byte);
-    let draw_width = FONT_WIDTH.min(width.saturating_sub(start_x));
+    let draw_width = FONT_WIDTH
+        .min(width.saturating_sub(start_x))
+        .min(pitch.saturating_sub(start_x));
     let draw_height = FONT_HEIGHT.min(height.saturating_sub(start_y));
 
     if draw_width == 0 || draw_height == 0 {
         return Err(());
     }
 
-    let (r, g, b) = color.components();
-    let pixel = match fb.pixel_format {
-        PixelFormat::Rgb => u32::from_le_bytes([r, g, b, 0xFF]),
-        PixelFormat::Bgr => u32::from_le_bytes([b, g, r, 0xFF]),
-    };
+    let pixel = encode_pixel(fb.pixel_format, color);
 
     let base_ptr = fb.base_address as *mut u32;
 
@@ -129,4 +132,12 @@ pub fn draw_glyph(
     }
 
     Ok(())
+}
+
+fn encode_pixel(format: PixelFormat, color: FramebufferColor) -> u32 {
+    let (r, g, b) = color.components();
+    match format {
+        PixelFormat::Rgb => u32::from_le_bytes([r, g, b, 0xFF]),
+        PixelFormat::Bgr => u32::from_le_bytes([b, g, r, 0xFF]),
+    }
 }
