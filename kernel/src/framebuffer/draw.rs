@@ -1,6 +1,8 @@
 use core::cmp::min;
 use oxide_abi::{Framebuffer, PixelFormat};
 
+use super::{FONT_HEIGHT, FONT_WIDTH, glyph_for};
+
 /// Simple RGB color helper for framebuffer drawing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FramebufferColor {
@@ -176,6 +178,62 @@ pub fn draw_rect(
             let row_ptr = base_ptr.add((start_y + y) * pitch + start_x);
             for x in 0..draw_width {
                 row_ptr.add(x).write_volatile(pixel);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Draw a single glyph bitmap at the given framebuffer coordinates.
+pub fn draw_glyph(
+    fb: &Framebuffer,
+    start_x: usize,
+    start_y: usize,
+    byte: u8,
+    color: FramebufferColor,
+) -> Result<(), ()> {
+    if fb.base_address == 0 {
+        return Err(());
+    }
+
+    let pitch = fb.pixels_per_scanline as usize;
+    let width = fb.width as usize;
+    let height = fb.height as usize;
+
+    if pitch == 0 || width == 0 || height == 0 {
+        return Err(());
+    }
+
+    if start_x >= width || start_y >= height {
+        return Err(());
+    }
+
+    let glyph = glyph_for(byte);
+    let draw_width = FONT_WIDTH.min(width.saturating_sub(start_x));
+    let draw_height = FONT_HEIGHT.min(height.saturating_sub(start_y));
+
+    if draw_width == 0 || draw_height == 0 {
+        return Err(());
+    }
+
+    let (r, g, b) = color.components();
+    let pixel = match fb.pixel_format {
+        PixelFormat::Rgb => u32::from_le_bytes([r, g, b, 0xFF]),
+        PixelFormat::Bgr => u32::from_le_bytes([b, g, r, 0xFF]),
+    };
+
+    let base_ptr = fb.base_address as *mut u32;
+
+    unsafe {
+        for row in 0..draw_height {
+            let bitmap_row = glyph[row];
+            let row_ptr = base_ptr.add((start_y + row) * pitch + start_x);
+            for col in 0..draw_width {
+                let bit = FONT_WIDTH - 1 - col;
+                if (bitmap_row >> bit) & 1 == 1 {
+                    row_ptr.add(col).write_volatile(pixel);
+                }
             }
         }
     }
