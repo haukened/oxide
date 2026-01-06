@@ -3,7 +3,13 @@
 
 use oxide_abi::BootAbi;
 
+use crate::{
+    framebuffer::BootStage,
+    memory::{frame::UsableFrameIter, map::MemoryMapIter},
+};
+
 mod framebuffer;
+mod memory;
 
 /// Kernel entry point called from the UEFI loader.
 ///
@@ -20,12 +26,35 @@ pub extern "C" fn kernel_main(boot_abi_ptr: *const BootAbi) -> ! {
 
     // SAFETY: caller (the UEFI loader) must ensure the pointer is valid at entry
     let boot_abi = unsafe { &*boot_abi_ptr };
+    let fb = &boot_abi.framebuffer;
 
     // Clear the framebuffer to assert control
-    framebuffer::clear_framebuffer(&boot_abi.framebuffer).expect("framebuffer clear failed");
+    framebuffer::clear_framebuffer(fb).expect("framebuffer clear failed");
 
     // Draw a boot marker to indicate that the kernel has started
-    framebuffer::draw_boot_marker(&boot_abi.framebuffer).expect("framebuffer marker failed");
+    framebuffer::draw_boot_stage(fb, BootStage::EnteredKernel);
+
+    let mem_map = &boot_abi.memory_map;
+    for desc in MemoryMapIter::new(mem_map) {
+        // For now, just a dummy operation to use the descriptor
+        let _ = desc.physical_start;
+    }
+
+    framebuffer::draw_boot_stage(fb, BootStage::ParsedMemoryMap);
+
+    let mut found = false;
+    for frame in UsableFrameIter::new(mem_map) {
+        let _ = frame;
+        // For now, just a dummy operation to use the frame
+        found = true;
+        break;
+    }
+
+    if found {
+        framebuffer::draw_boot_stage(fb, BootStage::FoundUsableMemory);
+    } else {
+        framebuffer::panic_screen(fb);
+    }
 
     loop {
         core::hint::spin_loop();
