@@ -49,6 +49,29 @@ macro_rules! fb_println {
     };
 }
 
+#[macro_export]
+macro_rules! fb_diag {
+    ($($arg:tt)*) => {
+        if $crate::options::diagnostics_enabled() {
+            $crate::framebuffer::console_write(core::format_args!($($arg)*));
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! fb_diagln {
+    () => {
+        if $crate::options::diagnostics_enabled() {
+            $crate::framebuffer::console_write(core::format_args!("\n"));
+        }
+    };
+    ($fmt:expr $(, $arg:tt)*) => {
+        if $crate::options::diagnostics_enabled() {
+            $crate::framebuffer::console_write(core::format_args!(concat!($fmt, "\n") $(, $arg)*));
+        }
+    };
+}
+
 pub fn clear_framebuffer(fb: &Framebuffer) -> Result<(), ()> {
     draw::clear_black(fb)
 }

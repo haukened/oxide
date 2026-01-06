@@ -16,6 +16,7 @@ fn sanitize_byte(byte: u8) -> u8 {
     }
 }
 
+/// Draw a single, already-sanitized ASCII byte at the provided coordinates.
 pub fn draw_char(
     fb: &Framebuffer,
     start_x: usize,
@@ -23,8 +24,7 @@ pub fn draw_char(
     byte: u8,
     color: FramebufferColor,
 ) -> Result<(), ()> {
-    let b = sanitize_byte(byte);
-    draw::draw_glyph(fb, start_x, start_y, b, color)
+    draw::draw_glyph(fb, start_x, start_y, byte, color)
 }
 
 pub struct FramebufferConsole {
@@ -71,7 +71,9 @@ impl FramebufferConsole {
     }
 
     fn put_byte(&mut self, byte: u8) {
-        match byte {
+        let b = sanitize_byte(byte);
+
+        match b {
             b'\n' => {
                 self.newline();
             }
@@ -92,7 +94,7 @@ impl FramebufferConsole {
 
                 let x = self.origin_x + self.cursor_col * FONT_WIDTH;
                 let y = self.origin_y + self.cursor_row * (FONT_HEIGHT + LINE_SPACING);
-                let _ = draw_char(&self.fb, x, y, byte, self.color);
+                let _ = draw_char(&self.fb, x, y, b, self.color);
                 self.cursor_col += 1;
             }
         }
@@ -106,8 +108,7 @@ impl fmt::Write for FramebufferConsole {
         }
 
         for byte in s.bytes() {
-            let sanitized = sanitize_byte(byte);
-            self.put_byte(sanitized);
+            self.put_byte(byte);
         }
 
         Ok(())
