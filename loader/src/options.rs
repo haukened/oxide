@@ -6,11 +6,20 @@ use uefi::{
 };
 
 #[allow(dead_code)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Boolean boot options parsed from the loader command line. Kept minimal for handoff.
 pub struct BootOptions {
     pub debug: bool,
     pub quiet: bool,
+}
+
+impl Default for BootOptions {
+    fn default() -> Self {
+        Self {
+            debug: cfg!(feature = "debug-default"),
+            quiet: false,
+        }
+    }
 }
 
 /// Convert to ABI Options representation.
