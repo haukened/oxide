@@ -1,15 +1,8 @@
-use crate::memory::map::MemoryMapIter;
+use crate::memory::{error::FrameAllocError, map::MemoryMapIter};
 use oxide_abi::{EfiMemoryType, MemoryMap};
 
 /// Size of a physical memory frame in bytes (4 KiB).
 pub const FRAME_SIZE: u64 = 4096;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FrameAllocError {
-    OutOfFrames,
-    NonContiguous { expected: u64, found: u64 },
-    InvalidRequest,
-}
 
 pub struct FrameAllocator<'a> {
     iter: UsableFrameIter<'a>,

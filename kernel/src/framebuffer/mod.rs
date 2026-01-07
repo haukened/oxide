@@ -47,6 +47,13 @@ pub(crate) fn console_write(args: fmt::Arguments<'_>) -> fmt::Result {
     }
 }
 
+pub(crate) fn console_available() -> bool {
+    unsafe {
+        let storage = &*BOOT_CONSOLE_STORAGE.0.get();
+        storage.is_some()
+    }
+}
+
 #[macro_export]
 macro_rules! fb_print {
     ($($arg:tt)*) => {

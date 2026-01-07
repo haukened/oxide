@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use crate::memory::frame::FrameAllocator;
+use crate::memory::{error::PagingError, frame::FrameAllocator};
 use oxide_abi::Framebuffer;
 
 /// 4 KiB page size.
@@ -23,14 +23,6 @@ const PTE_PS: u64 = 1 << 7; // Page Size (1 = 2MiB at PD level)
 // masks and helpers
 const ADDR_MASK_4K: u64 = 0x000f_ffff_ffff_f000;
 const ADDR_MASK_2M: u64 = 0x000f_ffff_ffe0_0000;
-
-/// Kernel paging errors
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PagingError {
-    OutOfFrames,
-    AddressOverflow,
-    UnsupportedAddress,
-}
 
 /// A single 4 KiB page table with 512 entries (PML4, PDPT, PD, or PT).
 #[repr(C, align(4096))]
@@ -98,10 +90,13 @@ pub unsafe fn install_identity_paging<A: PhysFrameAlloc>(
 
     // map framebuffer region (may be above low_bytes)
     let fb_start = fb.base_address;
-    let fb_end = fb
-        .base_address
-        .checked_add(fb.buffer_size)
-        .ok_or(PagingError::AddressOverflow)?;
+    let fb_end =
+        fb.base_address
+            .checked_add(fb.buffer_size)
+            .ok_or(PagingError::AddressOverflow(
+                fb.base_address,
+                fb.buffer_size,
+            ))?;
 
     map_identity_range_2mib(alloc, pdpt, fb_start, fb_end)?;
 
@@ -138,7 +133,7 @@ fn map_identity_range_2mib<A: PhysFrameAlloc>(
         let pml4_index = ((addr >> 39) & 0x1ff) as usize;
 
         if pml4_index != 0 {
-            return Err(PagingError::UnsupportedAddress);
+            return Err(PagingError::UnsupportedAddress(addr));
         }
 
         let pdpt_index = ((addr >> 30) & 0x1ff) as usize;
@@ -152,7 +147,7 @@ fn map_identity_range_2mib<A: PhysFrameAlloc>(
 
         addr = addr
             .checked_add(HUGE_PAGE_SIZE)
-            .ok_or(PagingError::AddressOverflow)?;
+            .ok_or(PagingError::AddressOverflow(addr, HUGE_PAGE_SIZE))?;
     }
 
     Ok(())

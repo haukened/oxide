@@ -1,8 +1,9 @@
 use core::ptr;
 
-use crate::memory::frame::{FRAME_SIZE, FrameAllocError, FrameAllocator, UsableFrameIter};
+use crate::memory::error::{FrameAllocError, MemoryInitError};
+use crate::memory::frame::{FRAME_SIZE, FrameAllocator, UsableFrameIter};
 use crate::memory::map::{descriptor_range, find_descriptor_containing};
-use crate::memory::paging::{HUGE_PAGE_SIZE, PagingError, install_identity_paging};
+use crate::memory::paging::{HUGE_PAGE_SIZE, install_identity_paging};
 use oxide_abi::{Framebuffer, MemoryMap};
 
 const LOW_IDENTITY_LIMIT: u64 = 1 * 1024 * 1024 * 1024; // 1 GiB
@@ -142,19 +143,6 @@ pub fn initialize(
     Ok(())
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum MemoryInitError {
-    NoUsableMemory,
-    EmptyMemoryMap,
-    OutOfFrames,
-    NonContiguous,
-    TooLarge,
-    StackDescriptorMissing(u64),
-    StackRangeOverflow(u32),
-    IdentityRangeOverflow { start: u64, end: u64 },
-    Paging(PagingError),
-}
-
 struct CopiedMemoryMap {
     map: MemoryMap,
     phys_range: (u64, u64),
@@ -184,12 +172,7 @@ fn copy_memory_map(
         .map_err(|err| match err {
             FrameAllocError::OutOfFrames => MemoryInitError::OutOfFrames,
             FrameAllocError::NonContiguous { expected, found } => {
-                crate::fb_println!(
-                    "Frame allocator produced non-contiguous sequence: expected {:#x}, found {:#x}",
-                    expected,
-                    found
-                );
-                MemoryInitError::NonContiguous
+                MemoryInitError::NonContiguous { expected, found }
             }
             FrameAllocError::InvalidRequest => MemoryInitError::EmptyMemoryMap,
         })?;
