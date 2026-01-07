@@ -47,6 +47,7 @@ pub(crate) fn console_write(args: fmt::Arguments<'_>) -> fmt::Result {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn console_available() -> bool {
     unsafe {
         let storage = &*BOOT_CONSOLE_STORAGE.0.get();
