@@ -62,7 +62,7 @@ fn kernel_run(boot_abi_ptr: *const BootAbi) -> Result<(), KernelError> {
 
     init::initialize(&memory_map, &framebuffer)?;
 
-    crate::fb_diagln!("Memory subsystem initialized.");
+    crate::fb_diagln!("Memory subsystem init complete.");
 
     Ok(())
 }

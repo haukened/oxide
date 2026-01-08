@@ -105,6 +105,11 @@ impl<'a> Iterator for UsableFrameIter<'a> {
             // Align start up to FRAME_SIZE
             start = (start + FRAME_SIZE - 1) & !(FRAME_SIZE - 1);
 
+            // Never yield the zero frame; treat anything below FRAME_SIZE as reserved
+            if start < FRAME_SIZE {
+                start = FRAME_SIZE;
+            }
+
             // If the aligned range is invalid, skip it
             if start >= end {
                 continue;

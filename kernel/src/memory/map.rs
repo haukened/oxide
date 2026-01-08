@@ -2,7 +2,7 @@ use crate::memory::frame::FRAME_SIZE;
 use oxide_abi::{MemoryDescriptor, MemoryMap};
 
 pub struct MemoryMapIter<'a> {
-    base: *const u8,
+    base: usize,
     entry_size: usize,
     remaining: u32,
     _marker: core::marker::PhantomData<&'a ()>,
@@ -11,7 +11,7 @@ pub struct MemoryMapIter<'a> {
 impl<'a> MemoryMapIter<'a> {
     pub fn new(map: &'a MemoryMap) -> Self {
         Self {
-            base: map.descriptors_phys as *const u8,
+            base: map.descriptors_phys as usize,
             entry_size: map.entry_size as usize,
             remaining: map.entry_count,
             _marker: core::marker::PhantomData,
@@ -48,8 +48,7 @@ impl<'a> Iterator for MemoryMapIter<'a> {
         }
 
         let desc = unsafe { &*(self.base as *const MemoryDescriptor) };
-
-        self.base = unsafe { self.base.add(self.entry_size) };
+        self.base = self.base.wrapping_add(self.entry_size);
         self.remaining -= 1;
 
         Some(desc)

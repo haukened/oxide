@@ -61,15 +61,20 @@ pub fn runtime_storage_plan(
     reservation_count: usize,
 ) -> Result<StoragePlan, PhysAllocInitError> {
     if map.map_size == 0 || map.entry_count == 0 {
+        crate::fb_diagln!("unable to create storage plan: empty memory map");
         return Err(PhysAllocInitError::Empty);
     }
 
-    let conventional_regions = MemoryMapIter::new(map)
-        .filter(|descriptor| {
-            descriptor.typ == EfiMemoryType::ConventionalMemory as u32
-                && descriptor.number_of_pages > 0
-        })
-        .count();
+    // Count the number of conventional memory regions in the map
+    let mut conventional_regions = 0usize;
+    let mut count_iter = MemoryMapIter::new(map);
+    while let Some(descriptor) = count_iter.next() {
+        if descriptor.typ == EfiMemoryType::ConventionalMemory as u32
+            && descriptor.number_of_pages > 0
+        {
+            conventional_regions += 1;
+        }
+    }
 
     if conventional_regions == 0 {
         return Err(PhysAllocInitError::Empty);
@@ -81,6 +86,13 @@ pub fn runtime_storage_plan(
     let free_slots = boundary_count.max(conventional_regions);
 
     let reserved_slots = reservation_count.saturating_add(conventional_regions.max(4));
+
+    crate::fb_diagln!(
+        "runtime storage plan: entries {} conventional {} reservations {}",
+        (map.entry_count),
+        conventional_regions,
+        reservation_count
+    );
 
     Ok(StoragePlan {
         free_slots,
@@ -477,18 +489,36 @@ impl<'a> PhysicalAllocator<'a> {
                 .map_err(|err| descriptor_error(index, err))?;
         }
 
+        let free_run_len = free.len();
+        let free_run_capacity = free.capacity();
+        crate::fb_diagln!(
+            "runtime allocator free runs populated: {} used / {} capacity",
+            free_run_len,
+            free_run_capacity
+        );
+
         if free.len() == 0 {
             return Err(PhysAllocInitError::Empty);
         }
 
         let mut reserved = ReservedList::new(reserved_storage);
         for &region in reservations {
+            let region_start = region.start;
+            let region_end = region.end;
             reserved
                 .push(region)
                 .map_err(|err| reservation_error(region, err))?;
-            free.subtract_range(region.start, region.end)
+            free.subtract_range(region_start, region_end)
                 .map_err(|err| reservation_error(region, err))?;
         }
+
+        let reserved_count = reserved.len();
+        let free_remaining = free.len();
+        crate::fb_diagln!(
+            "runtime allocator reservations applied: {} tracked, {} free runs remain",
+            reserved_count,
+            free_remaining
+        );
 
         Ok(Self {
             map,

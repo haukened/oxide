@@ -173,16 +173,11 @@ unsafe fn carve_option_storage<T: Copy + 'static>(
     })
 }
 
-struct StackInfo {
-    descriptor_type: u32,
-    range: (u64, u64),
-}
-
 pub fn initialize(
     memory_map: &MemoryMap,
     framebuffer: &Framebuffer,
 ) -> Result<(), MemoryInitError> {
-    crate::fb_diagln!("Initializing memory subsystem...");
+    crate::fb_diagln!("memory init: starting");
 
     ensure_usable_memory(memory_map)?;
 
@@ -193,44 +188,19 @@ pub fn initialize(
         phys_range: map_copy_range,
     } = copy_memory_map(memory_map, &mut frame_allocator)?;
 
-    crate::fb_diagln!("Memory map copied successfully.");
-
     let rsp = current_stack_pointer();
-    crate::fb_diagln!("Current RSP: {:#x}", rsp);
 
-    let stack_info = loader_stack_info(memory_map, rsp)?;
-
-    crate::fb_diagln!(
-        "Preserving memory map copy range [{:#x}, {:#x}]",
-        (map_copy_range.0),
-        (map_copy_range.1)
-    );
+    let (stack_start, stack_end) = loader_stack_info(memory_map, rsp)?;
 
     let mut identity_ranges = IdentityRanges::new();
     identity_ranges.push(map_copy_range)?;
 
-    let stack_type = stack_info.descriptor_type;
-    let (stack_start, stack_end) = stack_info.range;
-
-    crate::fb_diagln!(
-        "Preserving loader stack type {:#x} range [{:#x}, {:#x}]",
-        stack_type,
-        stack_start,
-        stack_end
-    );
-
     identity_ranges.push((stack_start, stack_end))?;
 
     let code_addr = initialize as usize as u64;
-    if let Some(((code_start, code_end), code_type)) =
+    if let Some(((code_start, code_end), _code_type)) =
         kernel_code_identity_range(memory_map, code_addr)
     {
-        crate::fb_diagln!(
-            "Preserving kernel code type {:#x} range [{:#x}, {:#x}]",
-            code_type,
-            code_start,
-            code_end
-        );
         identity_ranges.push((code_start, code_end))?;
     } else {
         crate::fb_println!(
@@ -258,8 +228,16 @@ pub fn initialize(
 
     reservations.push((framebuffer.base_address, framebuffer_end))?;
 
-    let storage_plan = allocator::runtime_storage_plan(&kernel_memory_map, reservations.len() + 2)
+    let reservation_hint = reservations.len() + 2;
+    let storage_plan = allocator::runtime_storage_plan(&kernel_memory_map, reservation_hint)
         .map_err(MemoryInitError::Allocator)?;
+
+    crate::fb_diagln!(
+        "runtime allocator storage plan: free {} reserved {} (hinted reservations {})",
+        (storage_plan.free_slots),
+        (storage_plan.reserved_slots),
+        (reservation_hint)
+    );
 
     let StorageSlice {
         slice: free_storage,
@@ -277,12 +255,19 @@ pub fn initialize(
     };
     reservations.push((reserved_region.start, reserved_region.end))?;
 
+    crate::fb_diagln!(
+        "runtime allocator storage carved: reservations now {}",
+        (reservations.len())
+    );
+
     allocator::initialize_runtime_allocator(
         kernel_memory_map,
         reservations.as_slice(),
         free_storage,
         reserved_storage,
     )?;
+
+    crate::fb_diagln!("runtime allocator initialized");
 
     let paging_result = allocator::with_runtime_allocator(|alloc| unsafe {
         install_identity_paging(alloc, framebuffer, LOW_IDENTITY_LIMIT, ranges)
@@ -298,9 +283,9 @@ pub fn initialize(
         }
     }
 
-    crate::fb_diagln!("Identity paging installed.");
+    crate::fb_diagln!("identity paging installed");
+    crate::fb_diagln!("memory init: completed");
 
-    crate::fb_println!("Memory subsystem initialization complete.");
     Ok(())
 }
 
@@ -374,7 +359,7 @@ fn current_stack_pointer() -> u64 {
     rsp
 }
 
-fn loader_stack_info(memory_map: &MemoryMap, rsp: u64) -> Result<StackInfo, MemoryInitError> {
+fn loader_stack_info(memory_map: &MemoryMap, rsp: u64) -> Result<(u64, u64), MemoryInitError> {
     let descriptor = find_descriptor_containing(memory_map, rsp)
         .ok_or(MemoryInitError::StackDescriptorMissing(rsp))?;
 
@@ -383,10 +368,7 @@ fn loader_stack_info(memory_map: &MemoryMap, rsp: u64) -> Result<StackInfo, Memo
     let range =
         descriptor_range(descriptor).ok_or(MemoryInitError::StackRangeOverflow(descriptor_type))?;
 
-    Ok(StackInfo {
-        descriptor_type,
-        range,
-    })
+    Ok(range)
 }
 
 fn kernel_code_identity_range(memory_map: &MemoryMap, code_addr: u64) -> Option<((u64, u64), u32)> {
