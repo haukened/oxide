@@ -1,17 +1,18 @@
 #![allow(dead_code)]
 
 /*
-- Tighten error plumbing: replace the internal Result<(), ()> placeholders with proper
-  AllocInitError/AllocationError variants, and ensure overflow cases bubble up cleanly.
-
 - Integration work: hook PhysicalAllocator::from_memory_map into memory::init, replace the ad‑hoc
-  FrameAllocator once the runtime allocator is ready, and expose a stable API for downstream modules.
+    FrameAllocator once the runtime allocator is ready, and expose a stable API for downstream modules.
 
 - Validation: add unit/struct tests or assertions to cover allocation/free cycles, coalescing, and
-  reservation carving.
+    reservation carving.
 */
 
-use crate::memory::{frame::FRAME_SIZE, map::MemoryMapIter};
+use crate::memory::{
+    error::{PhysAllocError, PhysAllocInitError},
+    frame::FRAME_SIZE,
+    map::MemoryMapIter,
+};
 use core::cmp::{max, min};
 use oxide_abi::{EfiMemoryType, MemoryMap};
 
@@ -35,21 +36,6 @@ impl PhysFrame {
 pub struct ReservedRegion {
     pub start: u64,
     pub end: u64,
-}
-
-/// Allocation failure reasons surfaced to callers.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AllocationError {
-    OutOfMemory,
-    Alignment,
-    UnsupportedSize,
-}
-
-/// Errors that can arise while building the runtime allocator from firmware state.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AllocInitError {
-    Empty,
-    InvalidDescriptor,
 }
 
 /// Describes the operations supported by the kernel's physical frame allocator.
@@ -89,7 +75,7 @@ impl<'a> FrameRunList<'a> {
         &self.entries
     }
 
-    fn push(&mut self, frame: PhysFrame) -> Result<(), ()> {
+    fn push(&mut self, frame: PhysFrame) -> Result<(), PhysAllocError> {
         if frame.count == 0 {
             return Ok(());
         }
@@ -102,7 +88,9 @@ impl<'a> FrameRunList<'a> {
             }
         }
 
-        Err(())
+        Err(PhysAllocError::StorageExhausted {
+            capacity: self.capacity(),
+        })
     }
 
     fn remove_slot(&mut self, index: usize) {
@@ -113,20 +101,33 @@ impl<'a> FrameRunList<'a> {
         }
     }
 
-    fn insert(&mut self, frame: PhysFrame) -> Result<(), ()> {
+    fn insert(&mut self, frame: PhysFrame) -> Result<(), PhysAllocError> {
         if frame.count == 0 {
             return Ok(());
         }
 
         let mut new_start = frame.start;
-        let mut new_end = span_end(frame.start, frame.count).ok_or(())?;
+        let mut new_end =
+            span_end(frame.start, frame.count).ok_or_else(|| PhysAllocError::RangeOverflow {
+                start: frame.start,
+                end: frame
+                    .start
+                    .saturating_add(frame.count.saturating_mul(FRAME_SIZE)),
+            })?;
 
         for slot in self.entries.iter_mut() {
             if let Some(existing) = slot {
                 let existing_start = existing.start;
                 let existing_end = match span_end(existing.start, existing.count) {
                     Some(end) => end,
-                    None => continue,
+                    None => {
+                        return Err(PhysAllocError::RangeOverflow {
+                            start: existing.start,
+                            end: existing
+                                .start
+                                .saturating_add(existing.count.saturating_mul(FRAME_SIZE)),
+                        });
+                    }
                 };
 
                 if new_end < existing_start || new_start > existing_end {
@@ -140,18 +141,26 @@ impl<'a> FrameRunList<'a> {
             }
         }
 
-        let span = new_end.checked_sub(new_start).ok_or(())?;
+        let span = new_end
+            .checked_sub(new_start)
+            .ok_or(PhysAllocError::RangeOverflow {
+                start: new_start,
+                end: new_end,
+            })?;
         if span % FRAME_SIZE != 0 {
-            return Err(());
+            return Err(PhysAllocError::RangeMisaligned {
+                start: new_start,
+                end: new_end,
+            });
         }
 
         let count = span / FRAME_SIZE;
         self.push(PhysFrame::new(new_start, count))
     }
 
-    fn allocate_count(&mut self, frames: u64) -> Option<PhysFrame> {
+    fn allocate_count(&mut self, frames: u64) -> Result<Option<PhysFrame>, PhysAllocError> {
         if frames == 0 {
-            return None;
+            return Err(PhysAllocError::UnsupportedFrameCount { frames });
         }
 
         for idx in 0..self.entries.len() {
@@ -168,25 +177,33 @@ impl<'a> FrameRunList<'a> {
 
             if run.count == frames {
                 self.remove_slot(idx);
-                return Some(alloc);
+                return Ok(Some(alloc));
             }
 
-            let advance_bytes = match frames.checked_mul(FRAME_SIZE) {
-                Some(bytes) => bytes,
-                None => continue,
-            };
+            let advance_bytes =
+                frames
+                    .checked_mul(FRAME_SIZE)
+                    .ok_or_else(|| PhysAllocError::RangeOverflow {
+                        start: run.start,
+                        end: run.start.saturating_add(frames.saturating_mul(FRAME_SIZE)),
+                    })?;
 
-            if let Some(new_start) = run.start.checked_add(advance_bytes) {
-                let remaining = run.count - frames;
-                self.entries[idx] = Some(PhysFrame::new(new_start, remaining));
-                return Some(alloc);
-            }
+            let new_start = run.start.checked_add(advance_bytes).ok_or_else(|| {
+                PhysAllocError::RangeOverflow {
+                    start: run.start,
+                    end: run.start.saturating_add(advance_bytes),
+                }
+            })?;
+
+            let remaining = run.count - frames;
+            self.entries[idx] = Some(PhysFrame::new(new_start, remaining));
+            return Ok(Some(alloc));
         }
 
-        None
+        Ok(None)
     }
 
-    fn subtract_range(&mut self, start: u64, end: u64) -> Result<(), ()> {
+    fn subtract_range(&mut self, start: u64, end: u64) -> Result<(), PhysAllocError> {
         if start >= end {
             return Ok(());
         }
@@ -208,13 +225,13 @@ impl<'a> FrameRunList<'a> {
                 }
             };
 
-            let run_end = match span_end(run.start, run.count) {
-                Some(end) => end,
-                None => {
-                    self.remove_slot(idx);
-                    continue;
-                }
-            };
+            let run_end =
+                span_end(run.start, run.count).ok_or_else(|| PhysAllocError::RangeOverflow {
+                    start: run.start,
+                    end: run
+                        .start
+                        .saturating_add(run.count.saturating_mul(FRAME_SIZE)),
+                })?;
 
             if range_end <= run.start || range_start >= run_end {
                 idx += 1;
@@ -229,22 +246,28 @@ impl<'a> FrameRunList<'a> {
             if cut_start > run.start {
                 let left_bytes = cut_start - run.start;
                 if left_bytes % FRAME_SIZE != 0 {
-                    return Err(());
+                    return Err(PhysAllocError::RangeMisaligned {
+                        start: run.start,
+                        end: cut_start,
+                    });
                 }
                 let left_count = left_bytes / FRAME_SIZE;
-                if left_count > 0 && self.push(PhysFrame::new(run.start, left_count)).is_err() {
-                    return Err(());
+                if left_count > 0 {
+                    self.push(PhysFrame::new(run.start, left_count))?;
                 }
             }
 
             if cut_end < run_end {
                 let right_bytes = run_end - cut_end;
                 if right_bytes % FRAME_SIZE != 0 {
-                    return Err(());
+                    return Err(PhysAllocError::RangeMisaligned {
+                        start: cut_end,
+                        end: run_end,
+                    });
                 }
                 let right_count = right_bytes / FRAME_SIZE;
-                if right_count > 0 && self.push(PhysFrame::new(cut_end, right_count)).is_err() {
-                    return Err(());
+                if right_count > 0 {
+                    self.push(PhysFrame::new(cut_end, right_count))?;
                 }
             }
 
@@ -290,9 +313,12 @@ impl<'a> ReservedList<'a> {
         &self.entries
     }
 
-    fn push(&mut self, region: ReservedRegion) -> Result<(), ()> {
+    fn push(&mut self, region: ReservedRegion) -> Result<(), PhysAllocError> {
         if region.start >= region.end {
-            return Err(());
+            return Err(PhysAllocError::InvalidRegion {
+                start: region.start,
+                end: region.end,
+            });
         }
 
         for slot in self.entries.iter_mut() {
@@ -303,7 +329,9 @@ impl<'a> ReservedList<'a> {
             }
         }
 
-        Err(())
+        Err(PhysAllocError::StorageExhausted {
+            capacity: self.capacity(),
+        })
     }
 
     fn iter(&self) -> ReservedRegionIter<'_> {
@@ -322,13 +350,13 @@ impl<'a> PhysicalAllocator<'a> {
         reservations: &[ReservedRegion],
         free_storage: &'a mut [Option<PhysFrame>],
         reserved_storage: &'a mut [Option<ReservedRegion>],
-    ) -> Result<Self, AllocInitError> {
+    ) -> Result<Self, PhysAllocInitError> {
         if map.map_size == 0 || map.entry_count == 0 {
-            return Err(AllocInitError::Empty);
+            return Err(PhysAllocInitError::Empty);
         }
 
         let mut free = FrameRunList::new(free_storage);
-        for descriptor in MemoryMapIter::new(&map) {
+        for (index, descriptor) in MemoryMapIter::new(&map).enumerate() {
             if descriptor.typ != EfiMemoryType::ConventionalMemory as u32 {
                 continue;
             }
@@ -339,20 +367,20 @@ impl<'a> PhysicalAllocator<'a> {
 
             let frame = PhysFrame::new(descriptor.physical_start, descriptor.number_of_pages);
             free.push(frame)
-                .map_err(|_| AllocInitError::InvalidDescriptor)?;
+                .map_err(|err| descriptor_error(index, err))?;
         }
 
         if free.len() == 0 {
-            return Err(AllocInitError::Empty);
+            return Err(PhysAllocInitError::Empty);
         }
 
         let mut reserved = ReservedList::new(reserved_storage);
         for &region in reservations {
             reserved
                 .push(region)
-                .map_err(|_| AllocInitError::InvalidDescriptor)?;
+                .map_err(|err| reservation_error(region, err))?;
             free.subtract_range(region.start, region.end)
-                .map_err(|_| AllocInitError::InvalidDescriptor)?;
+                .map_err(|err| reservation_error(region, err))?;
         }
 
         Ok(Self {
@@ -363,43 +391,36 @@ impl<'a> PhysicalAllocator<'a> {
     }
 
     /// Allocate a single 4 KiB frame.
-    pub fn allocate(&mut self) -> Result<PhysFrame, AllocationError> {
+    pub fn allocate(&mut self) -> Result<PhysFrame, PhysAllocError> {
         self.allocate_order(0)
     }
 
     /// Allocate `2^order` contiguous frames (order 0 = 1 frame, order 9 = 512 frames / 2 MiB).
-    pub fn allocate_order(&mut self, order: u8) -> Result<PhysFrame, AllocationError> {
+    pub fn allocate_order(&mut self, order: u8) -> Result<PhysFrame, PhysAllocError> {
         let frames = match 1u64.checked_shl(order as u32) {
             Some(count) if count > 0 => count,
-            _ => return Err(AllocationError::UnsupportedSize),
+            _ => return Err(PhysAllocError::UnsupportedFrameCount { frames: 0 }),
         };
 
-        self.free
-            .allocate_count(frames)
-            .ok_or(AllocationError::OutOfMemory)
+        match self.free.allocate_count(frames)? {
+            Some(frame) => Ok(frame),
+            None => Err(PhysAllocError::OutOfMemory),
+        }
     }
 
     /// Free a previously allocated run of frames.
-    pub fn free(&mut self, frame: PhysFrame) {
+    pub fn free(&mut self, frame: PhysFrame) -> Result<(), PhysAllocError> {
         if frame.count == 0 {
-            return;
+            return Ok(());
         }
 
-        if self.free.insert(frame).is_err() {
-            debug_assert!(false, "free list capacity exhausted");
-        }
+        self.free.insert(frame)
     }
 
     /// Mark an arbitrary region as reserved after initialization.
-    pub fn reserve(&mut self, region: ReservedRegion) {
-        if self.reserved.push(region).is_err() {
-            debug_assert!(false, "reserved list capacity exhausted");
-            return;
-        }
-
-        if self.free.subtract_range(region.start, region.end).is_err() {
-            debug_assert!(false, "failed to carve reserved region from free list");
-        }
+    pub fn reserve(&mut self, region: ReservedRegion) -> Result<(), PhysAllocError> {
+        self.reserved.push(region)?;
+        self.free.subtract_range(region.start, region.end)
     }
 
     /// Iterate over all free ranges currently tracked by the allocator.
@@ -459,6 +480,18 @@ fn span_end(start: u64, count: u64) -> Option<u64> {
     count
         .checked_mul(FRAME_SIZE)
         .and_then(|bytes| start.checked_add(bytes))
+}
+
+fn descriptor_error(index: usize, error: PhysAllocError) -> PhysAllocInitError {
+    PhysAllocInitError::InvalidDescriptor { index, error }
+}
+
+fn reservation_error(region: ReservedRegion, error: PhysAllocError) -> PhysAllocInitError {
+    PhysAllocInitError::ReservationConflict {
+        start: region.start,
+        end: region.end,
+        error,
+    }
 }
 
 fn align_down(value: u64) -> u64 {
