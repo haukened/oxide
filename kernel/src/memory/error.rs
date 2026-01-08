@@ -33,6 +33,8 @@ pub enum MemoryInitError {
     StackDescriptorMissing(u64),
     StackRangeOverflow(u32),
     IdentityRangeOverflow { start: u64, end: u64 },
+    Allocator(PhysAllocInitError),
+    AllocatorUnavailable,
     Paging(PagingError),
 }
 
@@ -59,6 +61,12 @@ impl core::fmt::Debug for MemoryInitError {
                 "MemoryInitError::IdentityRangeOverflow {{ start: {:#x}, end: {:#x} }}",
                 start, end
             ),
+            MemoryInitError::Allocator(err) => {
+                write!(f, "MemoryInitError::Allocator({:?})", err)
+            }
+            MemoryInitError::AllocatorUnavailable => {
+                write!(f, "MemoryInitError::AllocatorUnavailable")
+            }
             MemoryInitError::Paging(err) => write!(f, "MemoryInitError::Paging({:?})", err),
         }
     }
@@ -140,6 +148,7 @@ pub enum PhysAllocInitError {
         end: u64,
         error: PhysAllocError,
     },
+    AlreadyInitialized,
 }
 
 impl core::fmt::Debug for PhysAllocInitError {
@@ -156,6 +165,15 @@ impl core::fmt::Debug for PhysAllocInitError {
                 "PhysAllocInitError::ReservationConflict {{ start: {:#x}, end: {:#x}, error: {:?} }}",
                 start, end, error
             ),
+            PhysAllocInitError::AlreadyInitialized => {
+                write!(f, "PhysAllocInitError::AlreadyInitialized")
+            }
         }
+    }
+}
+
+impl From<PhysAllocInitError> for MemoryInitError {
+    fn from(err: PhysAllocInitError) -> Self {
+        MemoryInitError::Allocator(err)
     }
 }

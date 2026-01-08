@@ -13,7 +13,10 @@ use crate::memory::{
     frame::FRAME_SIZE,
     map::MemoryMapIter,
 };
-use core::cmp::{max, min};
+use core::{
+    cell::UnsafeCell,
+    cmp::{max, min},
+};
 use oxide_abi::{EfiMemoryType, MemoryMap};
 
 /// Physical frame identifier capturing a contiguous run of pages.
@@ -36,6 +39,110 @@ impl PhysFrame {
 pub struct ReservedRegion {
     pub start: u64,
     pub end: u64,
+}
+
+pub struct StoragePlan {
+    pub free_slots: usize,
+    pub reserved_slots: usize,
+}
+
+impl StoragePlan {
+    pub fn total_slots(&self) -> usize {
+        self.free_slots.saturating_add(self.reserved_slots)
+    }
+}
+
+/// Derive storage requirements for the runtime allocator based on the firmware map
+/// and the reservations that must be honored. The number of potential free runs is
+/// bounded by the set of descriptor and reservation boundaries, so capacity is sized
+/// proportionally without relying on fixed constants.
+pub fn runtime_storage_plan(
+    map: &MemoryMap,
+    reservation_count: usize,
+) -> Result<StoragePlan, PhysAllocInitError> {
+    if map.map_size == 0 || map.entry_count == 0 {
+        return Err(PhysAllocInitError::Empty);
+    }
+
+    let conventional_regions = MemoryMapIter::new(map)
+        .filter(|descriptor| {
+            descriptor.typ == EfiMemoryType::ConventionalMemory as u32
+                && descriptor.number_of_pages > 0
+        })
+        .count();
+
+    if conventional_regions == 0 {
+        return Err(PhysAllocInitError::Empty);
+    }
+
+    let boundary_count = conventional_regions
+        .saturating_add(reservation_count)
+        .saturating_mul(2);
+    let free_slots = boundary_count.max(conventional_regions);
+
+    let reserved_slots = reservation_count.saturating_add(conventional_regions.max(4));
+
+    Ok(StoragePlan {
+        free_slots,
+        reserved_slots,
+    })
+}
+
+struct AllocatorCell {
+    inner: UnsafeCell<Option<PhysicalAllocator<'static>>>,
+}
+
+impl AllocatorCell {
+    const fn new() -> Self {
+        Self {
+            inner: UnsafeCell::new(None),
+        }
+    }
+
+    fn initialize(
+        &self,
+        map: MemoryMap,
+        reservations: &[ReservedRegion],
+        free_storage: &'static mut [Option<PhysFrame>],
+        reserved_storage: &'static mut [Option<ReservedRegion>],
+    ) -> Result<(), PhysAllocInitError> {
+        let slot = unsafe { &mut *self.inner.get() };
+        if slot.is_some() {
+            return Err(PhysAllocInitError::AlreadyInitialized);
+        }
+
+        let allocator =
+            PhysicalAllocator::from_memory_map(map, reservations, free_storage, reserved_storage)?;
+
+        *slot = Some(allocator);
+        Ok(())
+    }
+
+    fn with<R>(&self, f: impl FnOnce(&mut PhysicalAllocator<'static>) -> R) -> Option<R> {
+        unsafe {
+            let slot = &mut *self.inner.get();
+            slot.as_mut().map(f)
+        }
+    }
+}
+
+unsafe impl Sync for AllocatorCell {}
+
+static GLOBAL_ALLOCATOR: AllocatorCell = AllocatorCell::new();
+
+pub fn initialize_runtime_allocator(
+    map: MemoryMap,
+    reservations: &[ReservedRegion],
+    free_storage: &'static mut [Option<PhysFrame>],
+    reserved_storage: &'static mut [Option<ReservedRegion>],
+) -> Result<(), PhysAllocInitError> {
+    GLOBAL_ALLOCATOR.initialize(map, reservations, free_storage, reserved_storage)
+}
+
+pub fn with_runtime_allocator<R>(
+    f: impl FnOnce(&mut PhysicalAllocator<'static>) -> R,
+) -> Option<R> {
+    GLOBAL_ALLOCATOR.with(f)
 }
 
 /// Describes the operations supported by the kernel's physical frame allocator.

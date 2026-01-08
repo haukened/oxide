@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use crate::memory::{error::PagingError, frame::FrameAllocator};
+use crate::memory::{allocator::PhysicalAllocator, error::PagingError, frame::FrameAllocator};
 use oxide_abi::Framebuffer;
 
 /// 4 KiB page size.
@@ -47,6 +47,12 @@ pub trait PhysFrameAlloc {
 impl PhysFrameAlloc for FrameAllocator<'_> {
     fn allocate_frame(&mut self) -> Option<u64> {
         self.alloc()
+    }
+}
+
+impl PhysFrameAlloc for PhysicalAllocator<'_> {
+    fn allocate_frame(&mut self) -> Option<u64> {
+        self.allocate().ok().map(|frame| frame.start)
     }
 }
 
