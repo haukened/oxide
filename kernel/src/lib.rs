@@ -30,6 +30,7 @@ pub extern "C" fn kernel_main(boot_abi_ptr: *const BootAbi) -> ! {
 }
 
 fn halt() -> ! {
+    crate::fb_println!("System halted.");
     loop {
         core::hint::spin_loop();
     }
