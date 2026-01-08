@@ -7,7 +7,7 @@ use super::{
     draw::{self, FramebufferSurface},
 };
 
-const LINE_SPACING: usize = 2;
+const LINE_SPACING: usize = 3;
 
 pub(crate) fn sanitize_byte(byte: u8) -> u8 {
     match byte {
