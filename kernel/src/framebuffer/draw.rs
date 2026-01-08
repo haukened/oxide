@@ -104,6 +104,58 @@ pub fn clear_black(fb: &Framebuffer) -> Result<(), ()> {
     Ok(())
 }
 
+/// Fill a rectangular region with the provided color.
+pub fn fill_rect(
+    surface: FramebufferSurface,
+    origin_x: usize,
+    origin_y: usize,
+    width: usize,
+    height: usize,
+    color: FramebufferColor,
+) -> Result<(), ()> {
+    let surface = surface.validate()?;
+
+    if width == 0 || height == 0 {
+        return Ok(());
+    }
+
+    if origin_x >= surface.width || origin_y >= surface.height {
+        return Err(());
+    }
+
+    if origin_x >= surface.pitch {
+        return Err(());
+    }
+
+    let max_width = min(
+        surface.width.saturating_sub(origin_x),
+        surface.pitch.saturating_sub(origin_x),
+    );
+    let draw_width = min(width, max_width);
+
+    let max_height = surface.height.saturating_sub(origin_y);
+    let draw_height = min(height, max_height);
+
+    if draw_width == 0 || draw_height == 0 {
+        return Err(());
+    }
+
+    let pixel = encode_pixel(surface.pixel_format, color);
+
+    unsafe {
+        for row in 0..draw_height {
+            let row_ptr = surface
+                .base_ptr
+                .add((origin_y + row) * surface.pitch + origin_x);
+            for col in 0..draw_width {
+                row_ptr.add(col).write_volatile(pixel);
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Draw a single glyph bitmap at the given framebuffer coordinates.
 pub fn draw_glyph(
     surface: FramebufferSurface,

@@ -1,6 +1,8 @@
 use core::{mem, ptr, slice};
 
+use crate::console::ConsoleStorage;
 use crate::memory::allocator::{self, ReservedRegion};
+use crate::memory::early;
 use crate::memory::error::{FrameAllocError, MemoryInitError, PagingError};
 use crate::memory::frame::{FRAME_SIZE, FrameAllocator, UsableFrameIter};
 use crate::memory::map::{descriptor_range, find_descriptor_containing};
@@ -125,6 +127,16 @@ struct StorageSlice<T: 'static> {
     region: ReservedRegion,
 }
 
+pub fn bootstrap_console_storage(map: &MemoryMap) -> Result<ConsoleStorage, MemoryInitError> {
+    let bytes = ConsoleStorage::required_bytes();
+    let region = early::allocate_region(map, bytes)?;
+
+    // SAFETY: The reserved region remains identity mapped during initialization
+    // and is tracked via the early reservation list to prevent reuse.
+    let storage = unsafe { ConsoleStorage::from_physical(region.start) };
+    Ok(storage)
+}
+
 /// Allocate a slice of `Option<T>` from physical memory frames and expose it as a
 /// leaked `'static` reference for the runtime allocator metadata.
 ///
@@ -215,6 +227,18 @@ pub fn initialize(
 
     let mut reservations = ReservationList::new();
     reservations.extend(ranges)?;
+
+    let mut early_reservation_error = None;
+    early::for_each(|region| {
+        if early_reservation_error.is_none() {
+            if let Err(err) = reservations.push((region.start, region.end)) {
+                early_reservation_error = Some(err);
+            }
+        }
+    });
+    if let Some(err) = early_reservation_error {
+        return Err(err);
+    }
 
     let framebuffer_end = framebuffer
         .base_address

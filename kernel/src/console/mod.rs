@@ -1,0 +1,403 @@
+use core::{cell::UnsafeCell, cmp::min, fmt, mem};
+
+use oxide_abi::Framebuffer;
+
+use crate::{
+    framebuffer::{self, FramebufferColor},
+    time,
+};
+
+const MAX_LINE_CHARS: usize = 160;
+const HISTORY_CAPACITY: usize = 128;
+const TIMESTAMP_PREFIX_MAX: usize = 1 + 20 + 2; // '[' + digits + '] '
+#[derive(Clone, Copy)]
+struct LineSlot {
+    len: u16,
+    timestamp_ticks: u64,
+    data: [u8; MAX_LINE_CHARS],
+}
+
+impl LineSlot {
+    const EMPTY: Self = Self {
+        len: 0,
+        timestamp_ticks: 0,
+        data: [0; MAX_LINE_CHARS],
+    };
+
+    fn write(&mut self, timestamp: u64, line: &[u8]) {
+        self.timestamp_ticks = timestamp;
+        let copy_len = min(line.len(), MAX_LINE_CHARS);
+        self.len = copy_len as u16;
+        self.data[..copy_len].copy_from_slice(&line[..copy_len]);
+        if copy_len < MAX_LINE_CHARS {
+            self.data[copy_len..].fill(0);
+        }
+    }
+}
+
+pub struct ConsoleStorage {
+    slots: &'static mut [LineSlot],
+}
+
+impl ConsoleStorage {
+    pub const fn required_bytes() -> usize {
+        HISTORY_CAPACITY * mem::size_of::<LineSlot>()
+    }
+
+    pub unsafe fn from_physical(start: u64) -> Self {
+        let ptr = start as *mut LineSlot;
+        let slots = unsafe { core::slice::from_raw_parts_mut(ptr, HISTORY_CAPACITY) };
+        for slot in slots.iter_mut() {
+            *slot = LineSlot::EMPTY;
+        }
+        Self { slots }
+    }
+
+    fn into_slots(self) -> &'static mut [LineSlot] {
+        self.slots
+    }
+}
+
+#[derive(Debug)]
+pub enum ConsoleInitError {
+    AlreadyInitialized,
+    FramebufferUnavailable,
+}
+
+struct ConsoleCell(UnsafeCell<Option<ConsoleState>>);
+
+unsafe impl Sync for ConsoleCell {}
+
+static CONSOLE_STATE: ConsoleCell = ConsoleCell(UnsafeCell::new(None));
+
+pub fn init(
+    framebuffer: Framebuffer,
+    color: FramebufferColor,
+    storage: ConsoleStorage,
+) -> Result<(), ConsoleInitError> {
+    unsafe {
+        let slot = &mut *CONSOLE_STATE.0.get();
+        if slot.is_some() {
+            return Err(ConsoleInitError::AlreadyInitialized);
+        }
+
+        let mut console = framebuffer::text::FramebufferConsole::new(
+            framebuffer,
+            0,
+            framebuffer::FONT_HEIGHT,
+            color,
+        );
+
+        if !console.is_usable() {
+            return Err(ConsoleInitError::FramebufferUnavailable);
+        }
+
+        console
+            .clear()
+            .map_err(|_| ConsoleInitError::FramebufferUnavailable)?;
+
+        let state = ConsoleState::new(console, storage.into_slots());
+        *slot = Some(state);
+        Ok(())
+    }
+}
+
+pub fn write(args: fmt::Arguments<'_>) -> fmt::Result {
+    unsafe {
+        let state_slot = &mut *CONSOLE_STATE.0.get();
+        let state = state_slot.as_mut().ok_or(fmt::Error)?;
+        state.write_fmt(args)
+    }
+}
+
+struct ConsoleState {
+    fb: framebuffer::text::FramebufferConsole,
+    history: History,
+    line: LineBuffer,
+    current_column: usize,
+    columns: usize,
+    current_timestamp: Option<u64>,
+}
+
+impl ConsoleState {
+    fn new(fb: framebuffer::text::FramebufferConsole, slots: &'static mut [LineSlot]) -> Self {
+        let columns = fb.cols();
+        Self {
+            fb,
+            history: History::new(slots),
+            line: LineBuffer::new(),
+            current_column: 0,
+            columns,
+            current_timestamp: None,
+        }
+    }
+
+    fn write_fmt(&mut self, args: fmt::Arguments<'_>) -> fmt::Result {
+        let mut writer = ConsoleWriter { state: self };
+        fmt::write(&mut writer, args)
+    }
+
+    fn handle_str(&mut self, s: &str) -> Result<(), ()> {
+        for byte in s.bytes() {
+            self.handle_byte(byte)?;
+        }
+        Ok(())
+    }
+
+    fn handle_byte(&mut self, byte: u8) -> Result<(), ()> {
+        let sanitized = framebuffer::text::sanitize_byte(byte);
+        match sanitized {
+            b'\n' => {
+                self.ensure_line_prefix()?;
+                self.fb.write_bytes(&[sanitized])?;
+                self.finish_line();
+            }
+            b'\r' => {
+                self.fb.write_bytes(&[sanitized])?;
+                self.line.clear();
+                self.current_column = 0;
+                self.current_timestamp = None;
+            }
+            _ => {
+                self.ensure_line_prefix()?;
+
+                if self.columns > 0 && self.current_column >= self.columns {
+                    self.finish_line();
+                    self.ensure_line_prefix()?;
+                }
+
+                if self.line.len() < MAX_LINE_CHARS {
+                    self.line.push(sanitized);
+                }
+
+                self.fb.write_bytes(&[sanitized])?;
+
+                if self.columns > 0 {
+                    self.current_column = self.current_column.saturating_add(1);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn finish_line(&mut self) {
+        let timestamp = if let Some(ts) = self.current_timestamp {
+            ts
+        } else {
+            let ts = time::monotonic_nanos()
+                .or_else(time::monotonic_ticks)
+                .unwrap_or(0);
+            self.current_timestamp = Some(ts);
+            ts
+        };
+
+        let line = self.line.as_slice();
+        self.history.push(timestamp, line);
+        self.line.clear();
+        self.current_column = 0;
+        self.current_timestamp = None;
+    }
+
+    fn ensure_line_prefix(&mut self) -> Result<(), ()> {
+        if self.line.len() == 0 {
+            let timestamp = if let Some(ts) = self.current_timestamp {
+                ts
+            } else {
+                let ts = time::monotonic_nanos()
+                    .or_else(time::monotonic_ticks)
+                    .unwrap_or(0);
+                self.current_timestamp = Some(ts);
+                ts
+            };
+
+            let mut prefix_buf = [0u8; TIMESTAMP_PREFIX_MAX];
+            let prefix_len = format_timestamp_prefix(&mut prefix_buf, timestamp);
+
+            if self.line.len() < MAX_LINE_CHARS {
+                let available = MAX_LINE_CHARS - self.line.len();
+                let copy_len = prefix_len.min(available);
+                self.line.extend_from_slice(&prefix_buf[..copy_len]);
+            }
+
+            self.fb.write_bytes(&prefix_buf[..prefix_len])?;
+
+            if self.columns > 0 {
+                self.current_column = self
+                    .current_column
+                    .saturating_add(prefix_len)
+                    .min(self.columns);
+
+                if self.current_column >= self.columns {
+                    self.finish_line();
+                    return Ok(());
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+struct ConsoleWriter<'a> {
+    state: &'a mut ConsoleState,
+}
+
+impl fmt::Write for ConsoleWriter<'_> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        self.state.handle_str(s).map_err(|_| fmt::Error)
+    }
+}
+
+struct History {
+    slots: &'static mut [LineSlot],
+    start: usize,
+    len: usize,
+}
+
+impl History {
+    fn new(slots: &'static mut [LineSlot]) -> Self {
+        Self {
+            slots,
+            start: 0,
+            len: 0,
+        }
+    }
+
+    fn push(&mut self, timestamp: u64, line: &[u8]) {
+        if self.slots.is_empty() {
+            return;
+        }
+
+        let capacity = self.slots.len();
+        let index = if self.len < capacity {
+            (self.start + self.len) % capacity
+        } else {
+            self.start
+        };
+
+        self.slots[index].write(timestamp, line);
+
+        if self.len < capacity {
+            self.len += 1;
+        } else {
+            self.start = (self.start + 1) % capacity;
+        }
+    }
+}
+
+struct LineBuffer {
+    data: [u8; MAX_LINE_CHARS],
+    len: usize,
+}
+
+impl LineBuffer {
+    const fn new() -> Self {
+        Self {
+            data: [0; MAX_LINE_CHARS],
+            len: 0,
+        }
+    }
+
+    fn push(&mut self, byte: u8) {
+        if self.len < MAX_LINE_CHARS {
+            self.data[self.len] = byte;
+            self.len += 1;
+        }
+    }
+
+    fn clear(&mut self) {
+        self.len = 0;
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        &self.data[..self.len]
+    }
+
+    fn extend_from_slice(&mut self, bytes: &[u8]) {
+        let available = MAX_LINE_CHARS.saturating_sub(self.len);
+        let copy_len = bytes.len().min(available);
+        if copy_len == 0 {
+            return;
+        }
+
+        let start = self.len;
+        let end = start + copy_len;
+        self.data[start..end].copy_from_slice(&bytes[..copy_len]);
+        self.len += copy_len;
+    }
+}
+
+#[macro_export]
+macro_rules! fb_print {
+    ($($arg:tt)*) => {{
+        let _ = $crate::console::write(core::format_args!($($arg)*));
+    }};
+}
+
+#[macro_export]
+macro_rules! fb_println {
+    () => {{
+        let _ = $crate::console::write(core::format_args!("\n"));
+    }};
+    ($fmt:expr $(, $arg:tt)*) => {{
+        let _ = $crate::console::write(core::format_args!(concat!($fmt, "\n") $(, $arg)*));
+    }};
+}
+
+#[macro_export]
+macro_rules! fb_diag {
+    ($($arg:tt)*) => {{
+        if $crate::options::diagnostics_enabled() {
+            let _ = $crate::console::write(core::format_args!($($arg)*));
+        }
+    }};
+}
+
+#[macro_export]
+macro_rules! fb_diagln {
+    () => {{
+        if $crate::options::diagnostics_enabled() {
+            let _ = $crate::console::write(core::format_args!("\n"));
+        }
+    }};
+    ($fmt:expr $(, $arg:tt)*) => {{
+        if $crate::options::diagnostics_enabled() {
+            let _ = $crate::console::write(core::format_args!(concat!($fmt, "\n") $(, $arg)*));
+        }
+    }};
+}
+
+fn format_timestamp_prefix(buf: &mut [u8; TIMESTAMP_PREFIX_MAX], timestamp: u64) -> usize {
+    buf[0] = b'[';
+
+    let mut tmp = [0u8; 20];
+    let mut digits = 0usize;
+    let mut value = timestamp;
+
+    if value == 0 {
+        tmp[0] = b'0';
+        digits = 1;
+    } else {
+        while value > 0 {
+            let digit = (value % 10) as u8;
+            tmp[digits] = b'0' + digit;
+            digits += 1;
+            value /= 10;
+        }
+    }
+
+    for i in 0..digits {
+        buf[1 + i] = tmp[digits - 1 - i];
+    }
+
+    let close_index = 1 + digits;
+    buf[close_index] = b']';
+    buf[close_index + 1] = b' ';
+
+    close_index + 2
+}

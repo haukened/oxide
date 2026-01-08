@@ -1,4 +1,4 @@
-use crate::memory::{error::FrameAllocError, map::MemoryMapIter};
+use crate::memory::{early, error::FrameAllocError, map::MemoryMapIter};
 use oxide_abi::{EfiMemoryType, MemoryMap};
 
 /// Size of a physical memory frame in bytes (4 KiB).
@@ -27,22 +27,54 @@ impl<'a> FrameAllocator<'a> {
             return Err(FrameAllocError::InvalidRequest);
         }
 
-        let first = self.alloc().ok_or(FrameAllocError::OutOfFrames)?;
-        let mut prev = first;
+        let mut run_start = None;
+        let mut prev_frame = 0u64;
+        let mut run_len = 0usize;
+        let mut gap_info: Option<(u64, u64)> = None;
 
-        for _ in 1..frame_count {
-            let next = self.alloc().ok_or(FrameAllocError::OutOfFrames)?;
-            let expected = prev + FRAME_SIZE;
-            if next != expected {
-                return Err(FrameAllocError::NonContiguous {
-                    expected,
-                    found: next,
-                });
+        while let Some(frame) = self.iter.next() {
+            match run_start {
+                None => {
+                    run_start = Some(frame);
+                    prev_frame = frame;
+                    run_len = 1;
+                }
+                Some(_) => {
+                    if let Some(expected) = prev_frame.checked_add(FRAME_SIZE) {
+                        if frame == expected {
+                            prev_frame = frame;
+                            run_len += 1;
+                        } else {
+                            if gap_info.is_none() {
+                                gap_info = Some((expected, frame));
+                            }
+                            run_start = Some(frame);
+                            prev_frame = frame;
+                            run_len = 1;
+                        }
+                    } else {
+                        if gap_info.is_none() {
+                            gap_info = Some((prev_frame.saturating_add(FRAME_SIZE), frame));
+                        }
+                        run_start = Some(frame);
+                        prev_frame = frame;
+                        run_len = 1;
+                    }
+                }
             }
-            prev = next;
+
+            if run_len == frame_count {
+                if let Some(start) = run_start {
+                    return Ok(start);
+                }
+            }
         }
 
-        Ok(first)
+        if let Some((expected, found)) = gap_info {
+            return Err(FrameAllocError::NonContiguous { expected, found });
+        }
+
+        Err(FrameAllocError::OutOfFrames)
     }
 }
 
@@ -70,6 +102,22 @@ impl<'a> Iterator for UsableFrameIter<'a> {
                 if *start < *end {
                     let frame = *start;
                     *start += FRAME_SIZE;
+
+                    if let Some(reservation) = early::contains_address(frame) {
+                        let mut next = reservation.end;
+                        if next % FRAME_SIZE != 0 {
+                            next = align_up(next);
+                        }
+
+                        if next < *end {
+                            *start = next;
+                            continue;
+                        } else {
+                            self.current_range = None;
+                            continue;
+                        }
+                    }
+
                     return Some(frame);
                 } else {
                     self.current_range = None;
@@ -119,4 +167,8 @@ impl<'a> Iterator for UsableFrameIter<'a> {
             self.current_range = Some((start, end));
         }
     }
+}
+
+fn align_up(value: u64) -> u64 {
+    (value + FRAME_SIZE - 1) & !(FRAME_SIZE - 1)
 }

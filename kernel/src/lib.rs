@@ -5,6 +5,7 @@ use oxide_abi::BootAbi;
 
 use crate::{errors::KernelError, memory::init};
 
+mod console;
 mod errors;
 mod framebuffer;
 mod memory;
@@ -53,10 +54,8 @@ fn kernel_run(boot_abi_ptr: *const BootAbi) -> Result<(), KernelError> {
     // Clear the framebuffer to assert control
     framebuffer::clear_framebuffer(&framebuffer).expect("framebuffer clear failed");
 
-    if unsafe { framebuffer::init_boot_console(framebuffer, framebuffer::FramebufferColor::WHITE) }
-        .is_err()
-    {
-        // No usable console; subsequent fb_* macros become no-ops.
+    if let Ok(storage) = init::bootstrap_console_storage(&memory_map) {
+        let _ = console::init(framebuffer, framebuffer::FramebufferColor::WHITE, storage);
     }
 
     // Pass None to use TSC as the time source because we don't have anything better at this point
