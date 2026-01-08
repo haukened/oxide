@@ -69,11 +69,13 @@ fn build_boot_abi(
     fw: FirmwareInfo,
     fb: FramebufferInfo,
     options: BootOptions,
+    tsc_frequency_hz: Option<u64>,
     mem: MemoryMapOwned,
 ) {
     abi.firmware = fw.into();
     abi.framebuffer = fb.into();
     abi.options = options.into();
+    abi.tsc_frequency_hz = tsc_frequency_hz.unwrap_or(0);
     abi.memory_map = convert_memory_map(mem);
 }
 
@@ -85,10 +87,11 @@ pub fn build_boot_abi_from_ptr(
     fw: FirmwareInfo,
     fb: FramebufferInfo,
     options: BootOptions,
+    tsc_frequency_hz: Option<u64>,
     mem: MemoryMapOwned,
 ) {
     unsafe {
         let abi = &mut *abi_ptr;
-        build_boot_abi(abi, fw, fb, options, mem);
+        build_boot_abi(abi, fw, fb, options, tsc_frequency_hz, mem);
     }
 }

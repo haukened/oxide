@@ -8,6 +8,7 @@ mod abi;
 mod firmware;
 mod framebuffer;
 mod options;
+mod time;
 mod writer;
 
 /// UEFI application entry point
@@ -51,11 +52,25 @@ fn run() -> uefi::Result<()> {
 
     let boot_options = options::get_boot_options();
 
+    let tsc_frequency = time::measure_tsc_frequency();
+    if let Some(freq) = tsc_frequency {
+        uefi::println!("Measured TSC frequency: {} Hz", freq);
+    } else {
+        uefi::println!("Warning: Unable to measure TSC frequency");
+    }
+
     // Here we exit boot services, so we lose all UEFI services after this point
     let mem_map = unsafe { uefi::boot::exit_boot_services(None) };
 
     // - build BootAbi
-    abi::build_boot_abi_from_ptr(boot_abi, fw_info, fb_info, boot_options, mem_map);
+    abi::build_boot_abi_from_ptr(
+        boot_abi,
+        fw_info,
+        fb_info,
+        boot_options,
+        tsc_frequency,
+        mem_map,
+    );
 
     // - jump to kernel
     kernel_main(boot_abi as *const _);
