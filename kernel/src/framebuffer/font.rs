@@ -41,6 +41,9 @@ const GLYPH_COLON: [u8; FONT_HEIGHT] = double_rows([
 const GLYPH_COMMA: [u8; FONT_HEIGHT] = double_rows([
     0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00011000, 0b00011000, 0b00110000,
 ]);
+const GLYPH_UNDERSCORE: [u8; FONT_HEIGHT] = double_rows([
+    0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b01111110, 0b00000000,
+]);
 const GLYPH_QUESTION: [u8; FONT_HEIGHT] = double_rows([
     0b00111100, 0b01100110, 0b00000110, 0b00001100, 0b00011000, 0b00000000, 0b00011000, 0b00011000,
 ]);
@@ -242,6 +245,7 @@ const fn build_glyph_lookup() -> [&'static [u8; FONT_HEIGHT]; 128] {
     table[b':' as usize] = &GLYPH_COLON;
     table[b',' as usize] = &GLYPH_COMMA;
     table[b'.' as usize] = &GLYPH_DOT;
+    table[b'_' as usize] = &GLYPH_UNDERSCORE;
     table[b'(' as usize] = &GLYPH_LPAREN;
     table[b')' as usize] = &GLYPH_RPAREN;
     table[b'[' as usize] = &GLYPH_LBRACKET;
