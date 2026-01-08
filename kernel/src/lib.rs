@@ -9,6 +9,7 @@ mod errors;
 mod framebuffer;
 mod memory;
 mod options;
+mod time;
 
 /// Kernel entry point called from the UEFI loader.
 ///
@@ -57,6 +58,9 @@ fn kernel_run(boot_abi_ptr: *const BootAbi) -> Result<(), KernelError> {
     {
         // No usable console; subsequent fb_* macros become no-ops.
     }
+
+    // Pass None to use TSC as the time source because we don't have anything better at this point
+    let _ = time::init_tsc_monotonic(None);
 
     crate::fb_diagln!("Oxide kernel starting...");
 
