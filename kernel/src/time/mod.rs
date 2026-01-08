@@ -2,15 +2,6 @@
 
 use core::{arch::asm, cell::UnsafeCell};
 
-/// Errors that can occur while configuring the monotonic time source.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MonotonicInitError {
-    /// A time source has already been installed.
-    AlreadyInitialized,
-    /// The provided frequency is invalid (for example, zero).
-    InvalidFrequency { requested_hz: u64 },
-}
-
 struct MonotonicCell(UnsafeCell<Option<MonotonicClock>>);
 
 unsafe impl Sync for MonotonicCell {}
@@ -19,24 +10,15 @@ static MONOTONIC_CLOCK: MonotonicCell = MonotonicCell(UnsafeCell::new(None));
 
 /// Configure the global monotonic clock using the processor timestamp counter.
 ///
-/// The optional `frequency_hz` parameter allows the caller to provide a calibrated
-/// TSC frequency. When absent, consumers can still retrieve raw tick counts but
-/// conversion to absolute time units will not be available.
-pub fn init_tsc_monotonic(frequency_hz: Option<u64>) -> Result<(), MonotonicInitError> {
+/// `frequency_hz` may be zero to indicate unknown calibration, in which case
+/// consumers can still read raw tick counts but nanosecond conversion is
+/// unavailable. Calling this more than once is harmless.
+pub fn init_tsc_monotonic(frequency_hz: u64) {
     unsafe {
         let slot = &mut *MONOTONIC_CLOCK.0.get();
-        if slot.is_some() {
-            return Err(MonotonicInitError::AlreadyInitialized);
+        if slot.is_none() {
+            *slot = Some(MonotonicClock::from_tsc(frequency_hz));
         }
-
-        if let Some(freq) = frequency_hz {
-            if freq == 0 {
-                return Err(MonotonicInitError::InvalidFrequency { requested_hz: freq });
-            }
-        }
-
-        *slot = Some(MonotonicClock::from_tsc(frequency_hz));
-        Ok(())
     }
 }
 
@@ -60,11 +42,11 @@ pub fn monotonic_nanos() -> Option<u64> {
 
 struct MonotonicClock {
     baseline_ticks: u64,
-    frequency_hz: Option<u64>,
+    frequency_hz: u64,
 }
 
 impl MonotonicClock {
-    fn from_tsc(frequency_hz: Option<u64>) -> Self {
+    fn from_tsc(frequency_hz: u64) -> Self {
         let baseline_ticks = unsafe { read_tsc() };
         Self {
             baseline_ticks,
@@ -78,12 +60,12 @@ impl MonotonicClock {
     }
 
     fn nanoseconds_since_start(&self) -> Option<u64> {
-        let frequency = self.frequency_hz?;
-        let ticks = self.elapsed_ticks() as u128;
-        let frequency = frequency as u128;
-        if frequency == 0 {
+        if self.frequency_hz == 0 {
             return None;
         }
+
+        let frequency = self.frequency_hz as u128;
+        let ticks = self.elapsed_ticks() as u128;
         let nanos = ticks
             .saturating_mul(1_000_000_000u128)
             .checked_div(frequency)?;

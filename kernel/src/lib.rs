@@ -3,10 +3,12 @@
 
 use oxide_abi::BootAbi;
 
-use crate::{errors::KernelError, memory::init};
+use crate::memory::{
+    error::{FrameAllocError, MemoryInitError},
+    init,
+};
 
 mod console;
-mod errors;
 mod framebuffer;
 mod memory;
 mod options;
@@ -58,8 +60,7 @@ fn kernel_run(boot_abi_ptr: *const BootAbi) -> Result<(), KernelError> {
         let _ = console::init(framebuffer, framebuffer::FramebufferColor::WHITE, storage);
     }
 
-    // Pass None to use TSC as the time source because we don't have anything better at this point
-    let _ = time::init_tsc_monotonic(None);
+    time::init_tsc_monotonic(boot_abi.tsc_frequency_hz);
 
     crate::fb_diagln!("Oxide kernel starting...");
 
@@ -75,5 +76,24 @@ fn kernel_run(boot_abi_ptr: *const BootAbi) -> Result<(), KernelError> {
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop {
         core::hint::spin_loop();
+    }
+}
+
+#[derive(Debug)]
+#[allow(dead_code)]
+pub enum KernelError {
+    MemoryInit(MemoryInitError),
+    FrameAlloc(FrameAllocError),
+}
+
+impl From<MemoryInitError> for KernelError {
+    fn from(err: MemoryInitError) -> Self {
+        KernelError::MemoryInit(err)
+    }
+}
+
+impl From<FrameAllocError> for KernelError {
+    fn from(err: FrameAllocError) -> Self {
+        KernelError::FrameAlloc(err)
     }
 }

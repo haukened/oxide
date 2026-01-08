@@ -9,23 +9,23 @@ use crate::{
 
 const MAX_LINE_CHARS: usize = 160;
 const HISTORY_CAPACITY: usize = 128;
-const TIMESTAMP_PREFIX_MAX: usize = 1 + 20 + 2; // '[' + digits + '] '
+const TIMESTAMP_PREFIX_MAX: usize = 32;
 #[derive(Clone, Copy)]
 struct LineSlot {
     len: u16,
-    timestamp_ticks: u64,
+    timestamp: Timestamp,
     data: [u8; MAX_LINE_CHARS],
 }
 
 impl LineSlot {
     const EMPTY: Self = Self {
         len: 0,
-        timestamp_ticks: 0,
+        timestamp: Timestamp::ZERO,
         data: [0; MAX_LINE_CHARS],
     };
 
-    fn write(&mut self, timestamp: u64, line: &[u8]) {
-        self.timestamp_ticks = timestamp;
+    fn write(&mut self, timestamp: Timestamp, line: &[u8]) {
+        self.timestamp = timestamp;
         let copy_len = min(line.len(), MAX_LINE_CHARS);
         self.len = copy_len as u16;
         self.data[..copy_len].copy_from_slice(&line[..copy_len]);
@@ -116,7 +116,7 @@ struct ConsoleState {
     line: LineBuffer,
     current_column: usize,
     columns: usize,
-    current_timestamp: Option<u64>,
+    current_timestamp: Option<Timestamp>,
 }
 
 impl ConsoleState {
@@ -182,15 +182,9 @@ impl ConsoleState {
     }
 
     fn finish_line(&mut self) {
-        let timestamp = if let Some(ts) = self.current_timestamp {
-            ts
-        } else {
-            let ts = time::monotonic_nanos()
-                .or_else(time::monotonic_ticks)
-                .unwrap_or(0);
-            self.current_timestamp = Some(ts);
-            ts
-        };
+        let timestamp = self
+            .current_timestamp
+            .unwrap_or_else(|| self.capture_timestamp());
 
         let line = self.line.as_slice();
         self.history.push(timestamp, line);
@@ -201,15 +195,10 @@ impl ConsoleState {
 
     fn ensure_line_prefix(&mut self) -> Result<(), ()> {
         if self.line.len() == 0 {
-            let timestamp = if let Some(ts) = self.current_timestamp {
-                ts
-            } else {
-                let ts = time::monotonic_nanos()
-                    .or_else(time::monotonic_ticks)
-                    .unwrap_or(0);
-                self.current_timestamp = Some(ts);
-                ts
-            };
+            let timestamp = self
+                .current_timestamp
+                .unwrap_or_else(|| self.capture_timestamp());
+            self.current_timestamp = Some(timestamp);
 
             let mut prefix_buf = [0u8; TIMESTAMP_PREFIX_MAX];
             let prefix_len = format_timestamp_prefix(&mut prefix_buf, timestamp);
@@ -236,6 +225,21 @@ impl ConsoleState {
         }
 
         Ok(())
+    }
+
+    fn capture_timestamp(&self) -> Timestamp {
+        if let Some(nanos) = time::monotonic_nanos() {
+            Timestamp {
+                value: nanos,
+                is_nanos: true,
+            }
+        } else {
+            let ticks = time::monotonic_ticks().unwrap_or(0);
+            Timestamp {
+                value: ticks,
+                is_nanos: false,
+            }
+        }
     }
 }
 
@@ -264,7 +268,7 @@ impl History {
         }
     }
 
-    fn push(&mut self, timestamp: u64, line: &[u8]) {
+    fn push(&mut self, timestamp: Timestamp, line: &[u8]) {
         if self.slots.is_empty() {
             return;
         }
@@ -372,12 +376,33 @@ macro_rules! fb_diagln {
     }};
 }
 
-fn format_timestamp_prefix(buf: &mut [u8; TIMESTAMP_PREFIX_MAX], timestamp: u64) -> usize {
-    buf[0] = b'[';
+fn format_timestamp_prefix(buf: &mut [u8; TIMESTAMP_PREFIX_MAX], timestamp: Timestamp) -> usize {
+    let mut index = 0;
+    buf[index] = b'[';
+    index += 1;
 
+    if timestamp.is_nanos {
+        let seconds = timestamp.value / 1_000_000_000;
+        let micros = ((timestamp.value % 1_000_000_000) / 1_000) as u32;
+
+        index += write_decimal(&mut buf[index..], seconds);
+        buf[index] = b'.';
+        index += 1;
+        index += write_fixed_width_decimal(&mut buf[index..], micros, 6);
+    } else {
+        index += write_decimal(&mut buf[index..], timestamp.value);
+    }
+
+    buf[index] = b']';
+    index += 1;
+    buf[index] = b' ';
+    index += 1;
+    index
+}
+
+fn write_decimal(out: &mut [u8], mut value: u64) -> usize {
     let mut tmp = [0u8; 20];
-    let mut digits = 0usize;
-    let mut value = timestamp;
+    let mut digits = 0;
 
     if value == 0 {
         tmp[0] = b'0';
@@ -392,12 +417,30 @@ fn format_timestamp_prefix(buf: &mut [u8; TIMESTAMP_PREFIX_MAX], timestamp: u64)
     }
 
     for i in 0..digits {
-        buf[1 + i] = tmp[digits - 1 - i];
+        out[i] = tmp[digits - 1 - i];
     }
 
-    let close_index = 1 + digits;
-    buf[close_index] = b']';
-    buf[close_index + 1] = b' ';
+    digits
+}
 
-    close_index + 2
+fn write_fixed_width_decimal(out: &mut [u8], mut value: u32, width: usize) -> usize {
+    for i in 0..width {
+        let digit = (value % 10) as u8;
+        out[width - 1 - i] = b'0' + digit;
+        value /= 10;
+    }
+    width
+}
+
+#[derive(Clone, Copy)]
+struct Timestamp {
+    value: u64,
+    is_nanos: bool,
+}
+
+impl Timestamp {
+    const ZERO: Self = Self {
+        value: 0,
+        is_nanos: false,
+    };
 }
