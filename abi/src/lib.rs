@@ -13,6 +13,8 @@ pub struct BootAbi {
     pub options: Options,
     pub firmware: Firmware,
     pub framebuffer: Framebuffer,
+    /// Measured processor TSC frequency in hertz (0 when unavailable).
+    pub tsc_frequency_hz: u64,
     pub memory_map: MemoryMap,
 }
 
