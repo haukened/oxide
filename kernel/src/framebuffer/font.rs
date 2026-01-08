@@ -15,7 +15,7 @@ pub fn glyph_for(byte: u8) -> &'static [u8; FONT_HEIGHT] {
     GLYPH_LOOKUP
         .get(byte as usize)
         .copied()
-        .unwrap_or(&GLYPH_QUESTION)
+        .unwrap_or(&GLYPH_SYM_QUES)
 }
 
 const fn double_rows(rows: [u8; 8]) -> [u8; FONT_HEIGHT] {
@@ -29,35 +29,112 @@ const fn double_rows(rows: [u8; 8]) -> [u8; FONT_HEIGHT] {
     out
 }
 
+/*
+    Explanation: Each byte represents a row of 8 pixels in the glyph bitmap.
+    A '1' bit indicates a filled pixel, and a '0' bit indicates a blank pixel.
+    The glyphs are defined in an 8-row format and then doubled to fit the
+    FONT_HEIGHT of 16 for better vertical resolution.
+
+    const GLYPH_A: [u8; FONT_HEIGHT] = double_rows([
+        0b00000000, // Row 0  =  □□□□□□□□
+        0b00011000, // Row 1  =  □□□■■□□□
+        0b00111100, // Row 2  =  □□■■■■□□
+        0b01100110, // Row 3  =  □■■□□■■□
+        0b01100110, // Row 4  =  □■■□□■■□
+        0b01111110, // Row 5  =  □■■■■■■□
+        0b01100110, // Row 6  =  □■■□□■■□
+        0b01100110, // Row 7  =  □■■□□■■□
+    ]);
+
+    (If you squint a little, you can see the letter 'A' in the pattern above)
+*/
+
 /* Punctuation and symbols */
 
-const GLYPH_BLANK: [u8; FONT_HEIGHT] = [0; FONT_HEIGHT];
-const GLYPH_DOT: [u8; FONT_HEIGHT] = double_rows([
-    0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00011000, 0b00011000,
+const GLYPH_SYM_SPCE: [u8; FONT_HEIGHT] = [0; FONT_HEIGHT];
+const GLYPH_SYM_EXCL: [u8; FONT_HEIGHT] = double_rows([
+    0b00011000, 0b00011000, 0b00011000, 0b00011000, 0b00011000, 0b00000000, 0b00011000, 0b00000000,
 ]);
-const GLYPH_COLON: [u8; FONT_HEIGHT] = double_rows([
-    0b00000000, 0b00011000, 0b00011000, 0b00000000, 0b00000000, 0b00011000, 0b00011000, 0b00000000,
+const GLYPH_SYM_AT: [u8; FONT_HEIGHT] = double_rows([
+    0b00111100, 0b01000010, 0b10111001, 0b10101001, 0b10111101, 0b10011110, 0b01000000, 0b00111100,
 ]);
-const GLYPH_COMMA: [u8; FONT_HEIGHT] = double_rows([
-    0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00011000, 0b00011000, 0b00110000,
+const GLYPH_SYM_HASH: [u8; FONT_HEIGHT] = double_rows([
+    0b00100100, 0b00100100, 0b01111110, 0b00100100, 0b00100100, 0b01111110, 0b00100100, 0b00100100,
 ]);
-const GLYPH_UNDERSCORE: [u8; FONT_HEIGHT] = double_rows([
-    0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b01111110, 0b00000000,
+const GLYPH_SYM_DOLL: [u8; FONT_HEIGHT] = double_rows([
+    0b00001000, 0b00111110, 0b01001000, 0b00111100, 0b00001010, 0b01111100, 0b00001000, 0b00000000,
 ]);
-const GLYPH_QUESTION: [u8; FONT_HEIGHT] = double_rows([
-    0b00111100, 0b01100110, 0b00000110, 0b00001100, 0b00011000, 0b00000000, 0b00011000, 0b00011000,
+const GLYPH_SYM_PERC: [u8; FONT_HEIGHT] = double_rows([
+    0b01100010, 0b01100100, 0b00001000, 0b00010000, 0b00100000, 0b01000110, 0b10000110, 0b00000000,
 ]);
-const GLYPH_LPAREN: [u8; FONT_HEIGHT] = double_rows([
+const GLYPH_SYM_CIRC: [u8; FONT_HEIGHT] = double_rows([
+    0b00010000, 0b00101000, 0b01000100, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+]);
+const GLYPH_SYM_AMPR: [u8; FONT_HEIGHT] = double_rows([
+    0b00111000, 0b01000100, 0b01000100, 0b00111000, 0b01001010, 0b01000100, 0b00111010, 0b00000000,
+]);
+const GLYPH_SYM_ASTR: [u8; FONT_HEIGHT] = double_rows([
+    0b00000000, 0b00101000, 0b00010000, 0b01111110, 0b00010000, 0b00101000, 0b00000000, 0b00000000,
+]);
+const GLYPH_SYM_LPAR: [u8; FONT_HEIGHT] = double_rows([
     0b00001110, 0b00011000, 0b00110000, 0b00110000, 0b00110000, 0b00011000, 0b00001110, 0b00000000,
 ]);
-const GLYPH_RPAREN: [u8; FONT_HEIGHT] = double_rows([
+const GLYPH_SYM_RPAR: [u8; FONT_HEIGHT] = double_rows([
     0b01110000, 0b00110000, 0b00011000, 0b00011000, 0b00011000, 0b00110000, 0b01110000, 0b00000000,
 ]);
-const GLYPH_LBRACKET: [u8; FONT_HEIGHT] = double_rows([
+const GLYPH_SYM_DASH: [u8; FONT_HEIGHT] = double_rows([
+    0b00000000, 0b00000000, 0b00000000, 0b01111110, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+]);
+const GLYPH_SYM_PLUS: [u8; FONT_HEIGHT] = double_rows([
+    0b00000000, 0b00010000, 0b00010000, 0b01111110, 0b00010000, 0b00010000, 0b00000000, 0b00000000,
+]);
+const GLYPH_SYM_UNDS: [u8; FONT_HEIGHT] = double_rows([
+    0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b01111110, 0b00000000,
+]);
+const GLYPH_SYM_EQLS: [u8; FONT_HEIGHT] = double_rows([
+    0b00000000, 0b00000000, 0b01111110, 0b00000000, 0b01111110, 0b00000000, 0b00000000, 0b00000000,
+]);
+const GLYPH_SYM_LBRC: [u8; FONT_HEIGHT] = double_rows([
     0b00011110, 0b00011000, 0b00011000, 0b00011000, 0b00011000, 0b00011000, 0b00011000, 0b00011110,
 ]);
-const GLYPH_RBRACKET: [u8; FONT_HEIGHT] = double_rows([
+const GLYPH_SYM_RBRC: [u8; FONT_HEIGHT] = double_rows([
     0b00011110, 0b00000110, 0b00000110, 0b00000110, 0b00000110, 0b00000110, 0b00000110, 0b00011110,
+]);
+const GLYPH_SYM_PIPE: [u8; FONT_HEIGHT] = double_rows([
+    0b00011000, 0b00011000, 0b00011000, 0b00011000, 0b00011000, 0b00011000, 0b00011000, 0b00011000,
+]);
+const GLYPH_SYM_BSLS: [u8; FONT_HEIGHT] = double_rows([
+    0b10000000, 0b01000000, 0b00100000, 0b00010000, 0b00001000, 0b00000100, 0b00000010, 0b00000000,
+]);
+const GLYPH_SYM_COLN: [u8; FONT_HEIGHT] = double_rows([
+    0b00000000, 0b00011000, 0b00011000, 0b00000000, 0b00000000, 0b00011000, 0b00011000, 0b00000000,
+]);
+const GLYPH_SYM_SEMI: [u8; FONT_HEIGHT] = double_rows([
+    0b00000000, 0b00011000, 0b00011000, 0b00000000, 0b00000000, 0b00011000, 0b00011000, 0b00110000,
+]);
+const GLYPH_SYM_APOS: [u8; FONT_HEIGHT] = double_rows([
+    0b00011000, 0b00011000, 0b00011000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+]);
+const GLYPH_SYM_DQUO: [u8; FONT_HEIGHT] = double_rows([
+    0b00110110, 0b00110110, 0b00110110, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+]);
+const GLYPH_SYM_COMM: [u8; FONT_HEIGHT] = double_rows([
+    0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00011000, 0b00011000, 0b00110000,
+]);
+const GLYPH_SYM_PERD: [u8; FONT_HEIGHT] = double_rows([
+    0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00011000, 0b00011000,
+]);
+const GLYPH_SYM_QUES: [u8; FONT_HEIGHT] = double_rows([
+    0b00111100, 0b01100110, 0b00000110, 0b00001100, 0b00011000, 0b00000000, 0b00011000, 0b00000000,
+]);
+const GLYPH_SYM_LESS: [u8; FONT_HEIGHT] = double_rows([
+    0b00000110, 0b00001100, 0b00011000, 0b00110000, 0b00011000, 0b00001100, 0b00000110, 0b00000000,
+]);
+const GLYPH_SYM_GRTR: [u8; FONT_HEIGHT] = double_rows([
+    0b01100000, 0b00110000, 0b00011000, 0b00001100, 0b00011000, 0b00110000, 0b01100000, 0b00000000,
+]);
+const GLYPH_SYM_FSLS: [u8; FONT_HEIGHT] = double_rows([
+    0b00000010, 0b00000100, 0b00001000, 0b00010000, 0b00100000, 0b01000000, 0b10000000, 0b00000000,
 ]);
 
 /* Letters A-Z */
@@ -175,7 +252,7 @@ const GLYPH_9: [u8; FONT_HEIGHT] = double_rows([
 ]);
 
 const fn build_glyph_lookup() -> [&'static [u8; FONT_HEIGHT]; 128] {
-    let mut table = [&GLYPH_QUESTION; 128];
+    let mut table = [&GLYPH_SYM_QUES; 128];
 
     table[b'0' as usize] = &GLYPH_0;
     table[b'1' as usize] = &GLYPH_1;
@@ -242,16 +319,35 @@ const fn build_glyph_lookup() -> [&'static [u8; FONT_HEIGHT]; 128] {
     table[b'y' as usize] = &GLYPH_Y;
     table[b'z' as usize] = &GLYPH_Z;
 
-    table[b':' as usize] = &GLYPH_COLON;
-    table[b',' as usize] = &GLYPH_COMMA;
-    table[b'.' as usize] = &GLYPH_DOT;
-    table[b'_' as usize] = &GLYPH_UNDERSCORE;
-    table[b'(' as usize] = &GLYPH_LPAREN;
-    table[b')' as usize] = &GLYPH_RPAREN;
-    table[b'[' as usize] = &GLYPH_LBRACKET;
-    table[b']' as usize] = &GLYPH_RBRACKET;
-    table[b'?' as usize] = &GLYPH_QUESTION;
-    table[b' ' as usize] = &GLYPH_BLANK;
+    table[b'!' as usize] = &GLYPH_SYM_EXCL;
+    table[b'"' as usize] = &GLYPH_SYM_DQUO;
+    table[b'#' as usize] = &GLYPH_SYM_HASH;
+    table[b'$' as usize] = &GLYPH_SYM_DOLL;
+    table[b'%' as usize] = &GLYPH_SYM_PERC;
+    table[b'&' as usize] = &GLYPH_SYM_AMPR;
+    table[b'\'' as usize] = &GLYPH_SYM_APOS;
+    table[b'(' as usize] = &GLYPH_SYM_LPAR;
+    table[b')' as usize] = &GLYPH_SYM_RPAR;
+    table[b'*' as usize] = &GLYPH_SYM_ASTR;
+    table[b'+' as usize] = &GLYPH_SYM_PLUS;
+    table[b',' as usize] = &GLYPH_SYM_COMM;
+    table[b'-' as usize] = &GLYPH_SYM_DASH;
+    table[b'.' as usize] = &GLYPH_SYM_PERD;
+    table[b'/' as usize] = &GLYPH_SYM_FSLS;
+    table[b':' as usize] = &GLYPH_SYM_COLN;
+    table[b';' as usize] = &GLYPH_SYM_SEMI;
+    table[b'<' as usize] = &GLYPH_SYM_LESS;
+    table[b'=' as usize] = &GLYPH_SYM_EQLS;
+    table[b'>' as usize] = &GLYPH_SYM_GRTR;
+    table[b'?' as usize] = &GLYPH_SYM_QUES;
+    table[b'@' as usize] = &GLYPH_SYM_AT;
+    table[b'[' as usize] = &GLYPH_SYM_LBRC;
+    table[b'\\' as usize] = &GLYPH_SYM_BSLS;
+    table[b']' as usize] = &GLYPH_SYM_RBRC;
+    table[b'^' as usize] = &GLYPH_SYM_CIRC;
+    table[b'_' as usize] = &GLYPH_SYM_UNDS;
+    table[b'|' as usize] = &GLYPH_SYM_PIPE;
+    table[b' ' as usize] = &GLYPH_SYM_SPCE;
 
     table
 }

@@ -98,6 +98,7 @@ pub fn init(
 
         let state = ConsoleState::new(console, storage.into_slots());
         *slot = Some(state);
+
         Ok(())
     }
 }
