@@ -1,11 +1,6 @@
 #![allow(dead_code)]
 
 /*
-Remaining gaps before this allocator is “real”:
-
-- Bootstrap real storage: carve space from the early allocator (or reserve a region during init)
-  so the free/reserved lists can grow dynamically and drop the MAX_* caps.
-
 - Tighten error plumbing: replace the internal Result<(), ()> placeholders with proper
   AllocInitError/AllocationError variants, and ensure overflow cases bubble up cleanly.
 
@@ -19,9 +14,6 @@ Remaining gaps before this allocator is “real”:
 use crate::memory::{frame::FRAME_SIZE, map::MemoryMapIter};
 use core::cmp::{max, min};
 use oxide_abi::{EfiMemoryType, MemoryMap};
-
-const MAX_FREE_RANGES: usize = 128;
-const MAX_RESERVED_RANGES: usize = 64;
 
 /// Physical frame identifier capturing a contiguous run of pages.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,31 +53,32 @@ pub enum AllocInitError {
 }
 
 /// Describes the operations supported by the kernel's physical frame allocator.
-pub struct PhysicalAllocator {
+pub struct PhysicalAllocator<'a> {
     /// Copy of the firmware memory map retained for provenance/debugging.
     map: MemoryMap,
     /// Current list of free physical frame runs managed by the allocator.
-    free: FrameRunList,
+    free: FrameRunList<'a>,
     /// Regions that must remain reserved and cannot be handed out.
-    reserved: ReservedList,
+    reserved: ReservedList<'a>,
 }
 
-/// Fixed-capacity table of free frame runs.
-struct FrameRunList {
-    entries: [Option<PhysFrame>; MAX_FREE_RANGES],
+/// Backing storage wrapper for free frame runs.
+struct FrameRunList<'a> {
+    entries: &'a mut [Option<PhysFrame>],
     len: usize,
 }
 
-impl FrameRunList {
-    const fn new() -> Self {
+impl<'a> FrameRunList<'a> {
+    fn new(storage: &'a mut [Option<PhysFrame>]) -> Self {
+        storage.fill(None);
         Self {
-            entries: [None; MAX_FREE_RANGES],
+            entries: storage,
             len: 0,
         }
     }
 
     fn capacity(&self) -> usize {
-        MAX_FREE_RANGES
+        self.entries.len()
     }
 
     fn len(&self) -> usize {
@@ -93,11 +86,7 @@ impl FrameRunList {
     }
 
     fn as_slice(&self) -> &[Option<PhysFrame>] {
-        &self.entries[..self.capacity()]
-    }
-
-    fn as_mut_slice(&mut self) -> &mut [Option<PhysFrame>] {
-        &mut self.entries[..MAX_FREE_RANGES]
+        &self.entries
     }
 
     fn push(&mut self, frame: PhysFrame) -> Result<(), ()> {
@@ -274,22 +263,23 @@ impl FrameRunList {
     }
 }
 
-/// Fixed-capacity table of reserved regions.
-struct ReservedList {
-    entries: [Option<ReservedRegion>; MAX_RESERVED_RANGES],
+/// Backing storage wrapper for reserved regions.
+struct ReservedList<'a> {
+    entries: &'a mut [Option<ReservedRegion>],
     len: usize,
 }
 
-impl ReservedList {
-    const fn new() -> Self {
+impl<'a> ReservedList<'a> {
+    fn new(storage: &'a mut [Option<ReservedRegion>]) -> Self {
+        storage.fill(None);
         Self {
-            entries: [None; MAX_RESERVED_RANGES],
+            entries: storage,
             len: 0,
         }
     }
 
     fn capacity(&self) -> usize {
-        MAX_RESERVED_RANGES
+        self.entries.len()
     }
 
     fn len(&self) -> usize {
@@ -297,7 +287,7 @@ impl ReservedList {
     }
 
     fn as_slice(&self) -> &[Option<ReservedRegion>] {
-        &self.entries[..self.capacity()]
+        &self.entries
     }
 
     fn push(&mut self, region: ReservedRegion) -> Result<(), ()> {
@@ -324,18 +314,20 @@ impl ReservedList {
     }
 }
 
-impl PhysicalAllocator {
+impl<'a> PhysicalAllocator<'a> {
     /// Build a runtime allocator using the copied memory map and any regions that must remain
     /// reserved (loader allocations, ACPI, framebuffer, etc.).
     pub fn from_memory_map(
         map: MemoryMap,
         reservations: &[ReservedRegion],
+        free_storage: &'a mut [Option<PhysFrame>],
+        reserved_storage: &'a mut [Option<ReservedRegion>],
     ) -> Result<Self, AllocInitError> {
         if map.map_size == 0 || map.entry_count == 0 {
             return Err(AllocInitError::Empty);
         }
 
-        let mut free = FrameRunList::new();
+        let mut free = FrameRunList::new(free_storage);
         for descriptor in MemoryMapIter::new(&map) {
             if descriptor.typ != EfiMemoryType::ConventionalMemory as u32 {
                 continue;
@@ -354,7 +346,7 @@ impl PhysicalAllocator {
             return Err(AllocInitError::Empty);
         }
 
-        let mut reserved = ReservedList::new();
+        let mut reserved = ReservedList::new(reserved_storage);
         for &region in reservations {
             reserved
                 .push(region)
