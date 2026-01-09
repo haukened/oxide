@@ -63,6 +63,7 @@ fn kernel_run(boot_abi_ptr: *const BootAbi) -> Result<(), KernelError> {
     time::init_tsc_monotonic(boot_abi.tsc_frequency_hz);
 
     crate::println!("Oxide kernel starting...");
+    crate::println!("Kernel: Entering epoch 1: Spark.");
 
     let (freq, unit) = human_readable_hz(boot_abi.tsc_frequency_hz);
     crate::diagln!("Detected CPU frequency: {:.2} {}", freq, unit);
