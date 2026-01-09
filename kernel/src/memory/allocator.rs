@@ -250,6 +250,29 @@ impl FrameSpan {
         let count = self.frame_count()?;
         Ok(PhysFrame::new(self.start, count))
     }
+
+    fn subtract(self, removal: &Self) -> Result<(Option<Self>, Option<Self>), PhysAllocError> {
+        if !self.overlaps(removal) {
+            return Ok((Some(self), None));
+        }
+
+        let removal_start = max(self.start, removal.start);
+        let removal_end = min(self.end, removal.end);
+
+        let left = if self.start < removal_start {
+            Some(Self::new(self.start, removal_start)?)
+        } else {
+            None
+        };
+
+        let right = if removal_end < self.end {
+            Some(Self::new(removal_end, self.end)?)
+        } else {
+            None
+        };
+
+        Ok((left, right))
+    }
 }
 
 impl<'a> FrameRunList<'a> {
@@ -403,64 +426,31 @@ impl<'a> FrameRunList<'a> {
             return Ok(());
         }
 
-        let mut idx = 0;
-        while idx < self.entries.len() {
+        let removal_span = FrameSpan::new(range_start, range_end)?;
+
+        for idx in 0..self.entries.len() {
             let run = match self.entries[idx] {
                 Some(run) => run,
-                None => {
-                    idx += 1;
-                    continue;
-                }
+                None => continue,
             };
 
-            let run_end =
-                span_end(run.start, run.count).ok_or_else(|| PhysAllocError::RangeOverflow {
-                    start: run.start,
-                    end: run
-                        .start
-                        .saturating_add(run.count.saturating_mul(FRAME_SIZE)),
-                })?;
+            let existing_span = FrameSpan::from_frame(run)?;
 
-            if range_end <= run.start || range_start >= run_end {
-                idx += 1;
+            if !existing_span.overlaps(&removal_span) {
                 continue;
             }
 
             self.remove_slot(idx);
 
-            let cut_start = max(run.start, range_start);
-            let cut_end = min(run_end, range_end);
+            let (left, right) = existing_span.subtract(&removal_span)?;
 
-            if cut_start > run.start {
-                let left_bytes = cut_start - run.start;
-                if left_bytes % FRAME_SIZE != 0 {
-                    return Err(PhysAllocError::RangeMisaligned {
-                        start: run.start,
-                        end: cut_start,
-                    });
-                }
-                let left_count = left_bytes / FRAME_SIZE;
-                if left_count > 0 {
-                    self.push(PhysFrame::new(run.start, left_count))?;
-                }
+            if let Some(span) = left {
+                self.push_span(span)?;
             }
 
-            if cut_end < run_end {
-                let right_bytes = run_end - cut_end;
-                if right_bytes % FRAME_SIZE != 0 {
-                    return Err(PhysAllocError::RangeMisaligned {
-                        start: cut_end,
-                        end: run_end,
-                    });
-                }
-                let right_count = right_bytes / FRAME_SIZE;
-                if right_count > 0 {
-                    self.push(PhysFrame::new(cut_end, right_count))?;
-                }
+            if let Some(span) = right {
+                self.push_span(span)?;
             }
-
-            // Restart the scan because new segments may have been appended earlier.
-            idx = 0;
         }
 
         Ok(())
