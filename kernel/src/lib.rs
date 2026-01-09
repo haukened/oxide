@@ -8,6 +8,7 @@ use crate::memory::{
     init,
 };
 
+mod boot;
 mod console;
 mod framebuffer;
 mod memory;
@@ -48,6 +49,9 @@ fn fatal(e: KernelError) -> ! {
 fn kernel_run(boot_abi_ptr: *const BootAbi) -> Result<(), KernelError> {
     // SAFETY: caller (the UEFI loader) must ensure the pointer is valid at entry
     let boot_abi = unsafe { &*boot_abi_ptr };
+
+    boot::validate_boot_abi(boot_abi)?;
+
     let framebuffer = boot_abi.framebuffer;
     let memory_map = boot_abi.memory_map;
 
@@ -88,8 +92,15 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 #[derive(Debug)]
 #[allow(dead_code)]
 pub enum KernelError {
+    BootValidation(boot::BootValidationError),
     MemoryInit(MemoryInitError),
     FrameAlloc(FrameAllocError),
+}
+
+impl From<boot::BootValidationError> for KernelError {
+    fn from(err: boot::BootValidationError) -> Self {
+        KernelError::BootValidation(err)
+    }
 }
 
 impl From<MemoryInitError> for KernelError {
