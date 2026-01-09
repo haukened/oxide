@@ -66,9 +66,10 @@ impl<'a> FrameAllocator<'a> {
             }
 
             if run_len == frame_count
-                && let Some(start) = run_start {
-                    return Ok(start);
-                }
+                && let Some(start) = run_start
+            {
+                return Ok(start);
+            }
         }
 
         if let Some((expected, found)) = gap_info {

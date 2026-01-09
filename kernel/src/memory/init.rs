@@ -33,8 +33,7 @@ impl IdentityRanges {
             return Ok(());
         }
 
-        if self.entries[..self.len].contains(&range)
-        {
+        if self.entries[..self.len].contains(&range) {
             return Ok(());
         }
 
@@ -83,8 +82,7 @@ impl ReservationList {
 
         let region = ReservedRegion { start, end };
 
-        if self.entries[..self.len].contains(&region)
-        {
+        if self.entries[..self.len].contains(&region) {
             return Ok(());
         }
 
@@ -115,6 +113,139 @@ impl ReservationList {
 
     fn len(&self) -> usize {
         self.len
+    }
+}
+
+fn stage_identity_ranges(
+    memory_map: &MemoryMap,
+    map_copy_range: (u64, u64),
+    rsp: u64,
+) -> Result<IdentityRanges, MemoryInitError> {
+    let mut identity_ranges = IdentityRanges::new();
+    identity_ranges.push(map_copy_range)?;
+
+    let (stack_start, stack_end) = loader_stack_info(memory_map, rsp)?;
+    identity_ranges.push((stack_start, stack_end))?;
+
+    let code_addr = initialize as usize as u64;
+    if let Some(((code_start, code_end), _code_type)) =
+        kernel_code_identity_range(memory_map, code_addr)
+    {
+        identity_ranges.push((code_start, code_end))?;
+    } else {
+        crate::println!(
+            "WARNING: KERNEL CODE ADDRESS {:#x} MISSING FROM MEMORY MAP.",
+            code_addr
+        );
+    }
+
+    log_identity_alignment(identity_ranges.as_slice());
+
+    Ok(identity_ranges)
+}
+
+fn stage_reservations(
+    identity_ranges: &[(u64, u64)],
+    framebuffer: &Framebuffer,
+) -> Result<ReservationList, MemoryInitError> {
+    let mut reservations = ReservationList::new();
+    reservations.extend(identity_ranges)?;
+
+    let mut early_reservation_error = None;
+    early::for_each(|region| {
+        if early_reservation_error.is_none()
+            && let Err(err) = reservations.push((region.start, region.end))
+        {
+            early_reservation_error = Some(err);
+        }
+    });
+    if let Some(err) = early_reservation_error {
+        return Err(err);
+    }
+
+    let framebuffer_end = framebuffer
+        .base_address
+        .checked_add(framebuffer.buffer_size)
+        .ok_or({
+            MemoryInitError::Paging(PagingError::AddressOverflow(
+                framebuffer.base_address,
+                framebuffer.buffer_size,
+            ))
+        })?;
+
+    reservations.push((framebuffer.base_address, framebuffer_end))?;
+
+    Ok(reservations)
+}
+
+fn bring_up_allocator(
+    frame_allocator: &mut FrameAllocator,
+    kernel_memory_map: MemoryMap,
+    reservations: &mut ReservationList,
+) -> Result<(), MemoryInitError> {
+    let reservation_hint = reservations.len() + 2;
+    let storage_plan = allocator::runtime_storage_plan(&kernel_memory_map, reservation_hint)
+        .map_err(MemoryInitError::Allocator)?;
+
+    crate::debug_structured!(
+        "Storage plan:",
+        [
+            ("free slots", storage_plan.free_slots),
+            ("reserved slots", storage_plan.reserved_slots),
+            ("hinted reservations", reservation_hint),
+        ]
+    );
+
+    let StorageSlice {
+        slice: free_storage,
+        region: free_region,
+    } = unsafe {
+        carve_option_storage::<allocator::PhysFrame>(frame_allocator, storage_plan.free_slots)?
+    };
+    reservations.push((free_region.start, free_region.end))?;
+
+    let StorageSlice {
+        slice: reserved_storage,
+        region: reserved_region,
+    } = unsafe {
+        carve_option_storage::<ReservedRegion>(frame_allocator, storage_plan.reserved_slots)?
+    };
+    reservations.push((reserved_region.start, reserved_region.end))?;
+
+    crate::debugln!(
+        "runtime allocator storage carved: reservations now {}",
+        reservations.len()
+    );
+
+    allocator::initialize_runtime_allocator(
+        kernel_memory_map,
+        reservations.as_slice(),
+        free_storage,
+        reserved_storage,
+    )?;
+
+    crate::diagln!("runtime allocator initialized");
+
+    Ok(())
+}
+
+fn install_identity_mappings(
+    identity_ranges: &[(u64, u64)],
+    framebuffer: &Framebuffer,
+) -> Result<(), MemoryInitError> {
+    let paging_result = allocator::with_runtime_allocator(|alloc| unsafe {
+        install_identity_paging(alloc, framebuffer, LOW_IDENTITY_LIMIT, identity_ranges)
+    });
+
+    match paging_result {
+        Some(result) => {
+            let _cr3 = result.map_err(MemoryInitError::Paging)?;
+            Ok(())
+        }
+        None => {
+            debug_assert!(false, "runtime allocator unavailable during paging setup");
+            Err(MemoryInitError::AllocatorUnavailable)
+        }
     }
 }
 
@@ -200,116 +331,69 @@ pub fn initialize(
 
     let rsp = current_stack_pointer();
 
-    let (stack_start, stack_end) = loader_stack_info(memory_map, rsp)?;
+    let identity_ranges = stage_identity_ranges(memory_map, map_copy_range, rsp)?;
 
-    let mut identity_ranges = IdentityRanges::new();
-    identity_ranges.push(map_copy_range)?;
+    let mut reservations = stage_reservations(identity_ranges.as_slice(), framebuffer)?;
 
-    identity_ranges.push((stack_start, stack_end))?;
+    bring_up_allocator(&mut frame_allocator, kernel_memory_map, &mut reservations)?;
 
-    let code_addr = initialize as usize as u64;
-    if let Some(((code_start, code_end), _code_type)) =
-        kernel_code_identity_range(memory_map, code_addr)
-    {
-        identity_ranges.push((code_start, code_end))?;
-    } else {
-        crate::println!(
-            "WARNING: KERNEL CODE ADDRESS {:#x} MISSING FROM MEMORY MAP.",
-            code_addr
-        );
-    }
-
-    let ranges = identity_ranges.as_slice();
-
-    log_identity_alignment(ranges);
-
-    let mut reservations = ReservationList::new();
-    reservations.extend(ranges)?;
-
-    let mut early_reservation_error = None;
-    early::for_each(|region| {
-        if early_reservation_error.is_none()
-            && let Err(err) = reservations.push((region.start, region.end)) {
-                early_reservation_error = Some(err);
-            }
-    });
-    if let Some(err) = early_reservation_error {
-        return Err(err);
-    }
-
-    let framebuffer_end = framebuffer
-        .base_address
-        .checked_add(framebuffer.buffer_size)
-        .ok_or({
-            MemoryInitError::Paging(PagingError::AddressOverflow(
-                framebuffer.base_address,
-                framebuffer.buffer_size,
-            ))
-        })?;
-
-    reservations.push((framebuffer.base_address, framebuffer_end))?;
-
-    let reservation_hint = reservations.len() + 2;
-    let storage_plan = allocator::runtime_storage_plan(&kernel_memory_map, reservation_hint)
-        .map_err(MemoryInitError::Allocator)?;
-
-    crate::debug_structured!(
-        "Storage plan:",
-        [
-            ("free slots", storage_plan.free_slots),
-            ("reserved slots", storage_plan.reserved_slots),
-            ("hinted reservations", reservation_hint),
-        ]
-    );
-
-    let StorageSlice {
-        slice: free_storage,
-        region: free_region,
-    } = unsafe {
-        carve_option_storage::<allocator::PhysFrame>(&mut frame_allocator, storage_plan.free_slots)?
-    };
-    reservations.push((free_region.start, free_region.end))?;
-
-    let StorageSlice {
-        slice: reserved_storage,
-        region: reserved_region,
-    } = unsafe {
-        carve_option_storage::<ReservedRegion>(&mut frame_allocator, storage_plan.reserved_slots)?
-    };
-    reservations.push((reserved_region.start, reserved_region.end))?;
-
-    crate::debugln!(
-        "runtime allocator storage carved: reservations now {}",
-        reservations.len()
-    );
-
-    allocator::initialize_runtime_allocator(
-        kernel_memory_map,
-        reservations.as_slice(),
-        free_storage,
-        reserved_storage,
-    )?;
-
-    crate::diagln!("runtime allocator initialized");
-
-    let paging_result = allocator::with_runtime_allocator(|alloc| unsafe {
-        install_identity_paging(alloc, framebuffer, LOW_IDENTITY_LIMIT, ranges)
-    });
-
-    match paging_result {
-        Some(result) => {
-            let _cr3 = result.map_err(MemoryInitError::Paging)?;
-        }
-        None => {
-            debug_assert!(false, "runtime allocator unavailable during paging setup");
-            return Err(MemoryInitError::AllocatorUnavailable);
-        }
-    }
+    install_identity_mappings(identity_ranges.as_slice(), framebuffer)?;
 
     crate::diagln!("identity paging installed");
     crate::diagln!("memory init: completed");
 
     Ok(())
+}
+
+fn ensure_usable_memory(memory_map: &MemoryMap) -> Result<(), MemoryInitError> {
+    if UsableFrameIter::new(memory_map).next().is_some() {
+        Ok(())
+    } else {
+        crate::println!("No usable memory frames found.");
+        Err(MemoryInitError::NoUsableMemory)
+    }
+}
+
+fn current_stack_pointer() -> u64 {
+    let mut rsp: u64;
+    unsafe {
+        core::arch::asm!("mov {}, rsp", out(reg) rsp);
+    }
+    rsp
+}
+
+fn loader_stack_info(memory_map: &MemoryMap, rsp: u64) -> Result<(u64, u64), MemoryInitError> {
+    let descriptor = find_descriptor_containing(memory_map, rsp)
+        .ok_or(MemoryInitError::StackDescriptorMissing(rsp))?;
+
+    let descriptor_type = descriptor.typ;
+
+    let range =
+        descriptor_range(descriptor).ok_or(MemoryInitError::StackRangeOverflow(descriptor_type))?;
+
+    Ok(range)
+}
+
+fn kernel_code_identity_range(memory_map: &MemoryMap, code_addr: u64) -> Option<((u64, u64), u32)> {
+    let descriptor = find_descriptor_containing(memory_map, code_addr)?;
+    let range = descriptor_range(descriptor)?;
+    Some((range, descriptor.typ))
+}
+
+fn log_identity_alignment(ranges: &[(u64, u64)]) {
+    for &(start, end) in ranges {
+        let aligned_start = start & !(HUGE_PAGE_SIZE - 1);
+        let aligned_end = (end + HUGE_PAGE_SIZE - 1) & !(HUGE_PAGE_SIZE - 1);
+        crate::debug_structured!(
+            "Mapping identity range:",
+            [
+                ("requested_start", start),
+                ("requested_end", end),
+                ("aligned_start", aligned_start),
+                ("aligned_end", aligned_end),
+            ]
+        );
+    }
 }
 
 struct CopiedMemoryMap {
@@ -363,55 +447,4 @@ fn copy_memory_map(
         map,
         phys_range: (first, phys_end),
     })
-}
-
-fn ensure_usable_memory(memory_map: &MemoryMap) -> Result<(), MemoryInitError> {
-    if UsableFrameIter::new(memory_map).next().is_some() {
-        Ok(())
-    } else {
-        crate::println!("No usable memory frames found.");
-        Err(MemoryInitError::NoUsableMemory)
-    }
-}
-
-fn current_stack_pointer() -> u64 {
-    let mut rsp: u64;
-    unsafe {
-        core::arch::asm!("mov {}, rsp", out(reg) rsp);
-    }
-    rsp
-}
-
-fn loader_stack_info(memory_map: &MemoryMap, rsp: u64) -> Result<(u64, u64), MemoryInitError> {
-    let descriptor = find_descriptor_containing(memory_map, rsp)
-        .ok_or(MemoryInitError::StackDescriptorMissing(rsp))?;
-
-    let descriptor_type = descriptor.typ;
-
-    let range =
-        descriptor_range(descriptor).ok_or(MemoryInitError::StackRangeOverflow(descriptor_type))?;
-
-    Ok(range)
-}
-
-fn kernel_code_identity_range(memory_map: &MemoryMap, code_addr: u64) -> Option<((u64, u64), u32)> {
-    let descriptor = find_descriptor_containing(memory_map, code_addr)?;
-    let range = descriptor_range(descriptor)?;
-    Some((range, descriptor.typ))
-}
-
-fn log_identity_alignment(ranges: &[(u64, u64)]) {
-    for &(start, end) in ranges {
-        let aligned_start = start & !(HUGE_PAGE_SIZE - 1);
-        let aligned_end = (end + HUGE_PAGE_SIZE - 1) & !(HUGE_PAGE_SIZE - 1);
-        crate::debug_structured!(
-            "Mapping identity range:",
-            [
-                ("requested_start", start),
-                ("requested_end", end),
-                ("aligned_start", aligned_start),
-                ("aligned_end", aligned_end),
-            ]
-        );
-    }
 }

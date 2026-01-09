@@ -29,15 +29,14 @@ pub fn descriptor_range(desc: &MemoryDescriptor) -> Option<(u64, u64)> {
 }
 
 /// Locate the descriptor that covers the supplied physical address.
-pub fn find_descriptor_containing(
-    map: &MemoryMap,
-    addr: u64,
-) -> Option<&MemoryDescriptor> {
+pub fn find_descriptor_containing(map: &MemoryMap, addr: u64) -> Option<&MemoryDescriptor> {
     for desc in MemoryMapIter::new(map) {
         if let Some((start, end)) = descriptor_range(desc)
-            && addr >= start && addr < end {
-                return Some(desc);
-            }
+            && addr >= start
+            && addr < end
+        {
+            return Some(desc);
+        }
     }
     None
 }
