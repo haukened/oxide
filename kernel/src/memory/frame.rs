@@ -9,6 +9,82 @@ pub struct FrameAllocator<'a> {
     iter: UsableFrameIter<'a>,
 }
 
+struct RunTracker {
+    required: usize,
+    start: Option<u64>,
+    previous: u64,
+    length: usize,
+}
+
+impl RunTracker {
+    fn new(required: usize) -> Self {
+        Self {
+            required,
+            start: None,
+            previous: 0,
+            length: 0,
+        }
+    }
+
+    fn update(&mut self, frame: u64, gaps: &mut GapTracker) {
+        match self.start {
+            None => self.restart(frame),
+            Some(_) => {
+                let expected = self.previous.checked_add(FRAME_SIZE);
+                match expected {
+                    Some(next) if frame == next => {
+                        self.previous = frame;
+                        self.length += 1;
+                    }
+                    Some(next) => {
+                        gaps.record((next, frame));
+                        self.restart(frame);
+                    }
+                    None => {
+                        let hinted = self.previous.saturating_add(FRAME_SIZE);
+                        gaps.record((hinted, frame));
+                        self.restart(frame);
+                    }
+                }
+            }
+        }
+    }
+
+    fn restart(&mut self, frame: u64) {
+        self.start = Some(frame);
+        self.previous = frame;
+        self.length = 1;
+    }
+
+    fn is_complete(&self) -> bool {
+        self.length >= self.required && self.start.is_some()
+    }
+
+    fn start_address(&self) -> Option<u64> {
+        self.start
+    }
+}
+
+struct GapTracker {
+    first_gap: Option<(u64, u64)>,
+}
+
+impl GapTracker {
+    fn new() -> Self {
+        Self { first_gap: None }
+    }
+
+    fn record(&mut self, gap: (u64, u64)) {
+        if self.first_gap.is_none() {
+            self.first_gap = Some(gap);
+        }
+    }
+
+    fn first(&self) -> Option<(u64, u64)> {
+        self.first_gap
+    }
+}
+
 impl<'a> FrameAllocator<'a> {
     /// Create a frame allocator over the provided firmware memory map.
     pub fn new(map: &'a MemoryMap) -> Self {
@@ -29,50 +105,20 @@ impl<'a> FrameAllocator<'a> {
             return Err(FrameAllocError::InvalidRequest);
         }
 
-        let mut run_start = None;
-        let mut prev_frame = 0u64;
-        let mut run_len = 0usize;
-        let mut gap_info: Option<(u64, u64)> = None;
+        let mut run = RunTracker::new(frame_count);
+        let mut gaps = GapTracker::new();
 
         for frame in self.iter.by_ref() {
-            match run_start {
-                None => {
-                    run_start = Some(frame);
-                    prev_frame = frame;
-                    run_len = 1;
-                }
-                Some(_) => {
-                    if let Some(expected) = prev_frame.checked_add(FRAME_SIZE) {
-                        if frame == expected {
-                            prev_frame = frame;
-                            run_len += 1;
-                        } else {
-                            if gap_info.is_none() {
-                                gap_info = Some((expected, frame));
-                            }
-                            run_start = Some(frame);
-                            prev_frame = frame;
-                            run_len = 1;
-                        }
-                    } else {
-                        if gap_info.is_none() {
-                            gap_info = Some((prev_frame.saturating_add(FRAME_SIZE), frame));
-                        }
-                        run_start = Some(frame);
-                        prev_frame = frame;
-                        run_len = 1;
-                    }
-                }
-            }
+            run.update(frame, &mut gaps);
 
-            if run_len == frame_count
-                && let Some(start) = run_start
+            if run.is_complete()
+                && let Some(start) = run.start_address()
             {
                 return Ok(start);
             }
         }
 
-        if let Some((expected, found)) = gap_info {
+        if let Some((expected, found)) = gaps.first() {
             return Err(FrameAllocError::NonContiguous { expected, found });
         }
 
