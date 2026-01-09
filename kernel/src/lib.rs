@@ -34,14 +34,14 @@ pub extern "C" fn kernel_main(boot_abi_ptr: *const BootAbi) -> ! {
 }
 
 fn halt() -> ! {
-    crate::fb_println!("System halted.");
+    crate::println!("System halted.");
     loop {
         core::hint::spin_loop();
     }
 }
 
 fn fatal(e: KernelError) -> ! {
-    crate::fb_println!("Fatal kernel error: {:?}", e);
+    crate::println!("Fatal kernel error: {:?}", e);
     halt();
 }
 
@@ -62,12 +62,12 @@ fn kernel_run(boot_abi_ptr: *const BootAbi) -> Result<(), KernelError> {
 
     time::init_tsc_monotonic(boot_abi.tsc_frequency_hz);
 
-    crate::fb_println!("Oxide kernel starting...");
-    crate::fb_diagln!("Detected CPU frequency: {} Hz", boot_abi.tsc_frequency_hz);
+    crate::println!("Oxide kernel starting...");
+    crate::diagln!("Detected CPU frequency: {} Hz", boot_abi.tsc_frequency_hz);
 
     init::initialize(&memory_map, &framebuffer)?;
 
-    crate::fb_diagln!("Memory subsystem init complete.");
+    crate::diagln!("Memory subsystem init complete.");
 
     Ok(())
 }

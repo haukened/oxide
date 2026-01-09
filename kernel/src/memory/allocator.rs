@@ -61,7 +61,7 @@ pub fn runtime_storage_plan(
     reservation_count: usize,
 ) -> Result<StoragePlan, PhysAllocInitError> {
     if map.map_size == 0 || map.entry_count == 0 {
-        crate::fb_diagln!("unable to create storage plan: empty memory map");
+        crate::diagln!("unable to create storage plan: empty memory map");
         return Err(PhysAllocInitError::Empty);
     }
 
@@ -87,9 +87,9 @@ pub fn runtime_storage_plan(
 
     let reserved_slots = reservation_count.saturating_add(conventional_regions.max(4));
 
-    crate::fb_diagln!(
+    crate::diagln!(
         "runtime storage plan: entries {} conventional {} reservations {}",
-        (map.entry_count),
+        map.entry_count,
         conventional_regions,
         reservation_count
     );
@@ -491,7 +491,7 @@ impl<'a> PhysicalAllocator<'a> {
 
         let free_run_len = free.len();
         let free_run_capacity = free.capacity();
-        crate::fb_diagln!(
+        crate::diagln!(
             "runtime allocator free runs populated: {} used / {} capacity",
             free_run_len,
             free_run_capacity
@@ -514,7 +514,7 @@ impl<'a> PhysicalAllocator<'a> {
 
         let reserved_count = reserved.len();
         let free_remaining = free.len();
-        crate::fb_diagln!(
+        crate::diagln!(
             "runtime allocator reservations applied: {} tracked, {} free runs remain",
             reserved_count,
             free_remaining

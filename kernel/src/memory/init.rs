@@ -41,10 +41,10 @@ impl IdentityRanges {
         }
 
         if self.len >= MAX_IDENTITY_RANGES {
-            crate::fb_diagln!(
+            crate::diagln!(
                 "IDENTITY RANGE CAP HIT WHILE STAGING [{:#x}, {:#x}]",
-                (range.0),
-                (range.1)
+                range.0,
+                range.1
             );
             return Err(MemoryInitError::IdentityRangeOverflow {
                 start: range.0,
@@ -93,7 +93,7 @@ impl ReservationList {
         }
 
         if self.len >= MAX_RESERVATIONS {
-            crate::fb_diagln!(
+            crate::diagln!(
                 "RESERVATION CAP HIT WHILE STAGING [{:#x}, {:#x}]",
                 start,
                 end
@@ -189,7 +189,7 @@ pub fn initialize(
     memory_map: &MemoryMap,
     framebuffer: &Framebuffer,
 ) -> Result<(), MemoryInitError> {
-    crate::fb_diagln!("memory init: starting");
+    crate::diagln!("memory init: starting");
 
     ensure_usable_memory(memory_map)?;
 
@@ -215,7 +215,7 @@ pub fn initialize(
     {
         identity_ranges.push((code_start, code_end))?;
     } else {
-        crate::fb_println!(
+        crate::println!(
             "WARNING: KERNEL CODE ADDRESS {:#x} MISSING FROM MEMORY MAP.",
             code_addr
         );
@@ -256,11 +256,11 @@ pub fn initialize(
     let storage_plan = allocator::runtime_storage_plan(&kernel_memory_map, reservation_hint)
         .map_err(MemoryInitError::Allocator)?;
 
-    crate::fb_diagln!(
+    crate::diagln!(
         "runtime allocator storage plan: free {} reserved {} (hinted reservations {})",
-        (storage_plan.free_slots),
-        (storage_plan.reserved_slots),
-        (reservation_hint)
+        storage_plan.free_slots,
+        storage_plan.reserved_slots,
+        reservation_hint
     );
 
     let StorageSlice {
@@ -279,9 +279,9 @@ pub fn initialize(
     };
     reservations.push((reserved_region.start, reserved_region.end))?;
 
-    crate::fb_diagln!(
+    crate::diagln!(
         "runtime allocator storage carved: reservations now {}",
-        (reservations.len())
+        reservations.len()
     );
 
     allocator::initialize_runtime_allocator(
@@ -291,7 +291,7 @@ pub fn initialize(
         reserved_storage,
     )?;
 
-    crate::fb_diagln!("runtime allocator initialized");
+    crate::diagln!("runtime allocator initialized");
 
     let paging_result = allocator::with_runtime_allocator(|alloc| unsafe {
         install_identity_paging(alloc, framebuffer, LOW_IDENTITY_LIMIT, ranges)
@@ -307,8 +307,8 @@ pub fn initialize(
         }
     }
 
-    crate::fb_diagln!("identity paging installed");
-    crate::fb_diagln!("memory init: completed");
+    crate::diagln!("identity paging installed");
+    crate::diagln!("memory init: completed");
 
     Ok(())
 }
@@ -370,7 +370,7 @@ fn ensure_usable_memory(memory_map: &MemoryMap) -> Result<(), MemoryInitError> {
     if UsableFrameIter::new(memory_map).next().is_some() {
         Ok(())
     } else {
-        crate::fb_println!("No usable memory frames found.");
+        crate::println!("No usable memory frames found.");
         Err(MemoryInitError::NoUsableMemory)
     }
 }
@@ -405,7 +405,7 @@ fn log_identity_alignment(ranges: &[(u64, u64)]) {
     for &(start, end) in ranges {
         let aligned_start = start & !(HUGE_PAGE_SIZE - 1);
         let aligned_end = (end + HUGE_PAGE_SIZE - 1) & !(HUGE_PAGE_SIZE - 1);
-        crate::fb_diagln!(
+        crate::diagln!(
             "Mapping identity range [{:#x}, {:#x}] aligned to [{:#x}, {:#x}]",
             start,
             end,

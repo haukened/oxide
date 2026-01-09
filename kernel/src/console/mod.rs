@@ -338,14 +338,14 @@ impl LineBuffer {
 }
 
 #[macro_export]
-macro_rules! fb_print {
+macro_rules! print {
     ($($arg:tt)*) => {{
         let _ = $crate::console::write(core::format_args!($($arg)*));
     }};
 }
 
 #[macro_export]
-macro_rules! fb_println {
+macro_rules! println {
     () => {{
         let _ = $crate::console::write(core::format_args!("\n"));
     }};
@@ -355,7 +355,7 @@ macro_rules! fb_println {
 }
 
 #[macro_export]
-macro_rules! fb_diag {
+macro_rules! diag {
     ($($arg:tt)*) => {{
         if $crate::options::diagnostics_enabled() {
             let _ = $crate::console::write(core::format_args!($($arg)*));
@@ -364,7 +364,7 @@ macro_rules! fb_diag {
 }
 
 #[macro_export]
-macro_rules! fb_diagln {
+macro_rules! diagln {
     () => {{
         if $crate::options::diagnostics_enabled() {
             let _ = $crate::console::write(core::format_args!("\n"));
