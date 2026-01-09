@@ -94,7 +94,7 @@ Failure in this phase halts the system.
 - Enable memory protection
 
 ### Guarantees After Transition
-- Virtual memory active
+- Virtual memory active (identity mapped regions)
 - Kernel memory protected
 - Allocators available
 
