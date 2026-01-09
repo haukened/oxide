@@ -71,6 +71,8 @@ fn kernel_run(boot_abi_ptr: *const BootAbi) -> Result<(), KernelError> {
 
     crate::diagln!("Memory subsystem init complete.");
 
+    crate::println!("Kernel: Entering epoch 2: Foundation.");
+
     Ok(())
 }
 
