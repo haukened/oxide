@@ -191,8 +191,7 @@ pub fn draw_glyph(
     let pixel = encode_pixel(surface.pixel_format, color);
 
     unsafe {
-        for row in 0..draw_height {
-            let bitmap_row = glyph[row];
+        for (row, bitmap_row) in glyph.iter().copied().enumerate().take(draw_height) {
             let row_ptr = surface.base_ptr.add((start_y + row) * pitch + start_x);
             for col in 0..draw_width {
                 let bit = FONT_WIDTH - 1 - col;
