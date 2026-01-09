@@ -377,6 +377,41 @@ macro_rules! diagln {
     }};
 }
 
+#[macro_export]
+macro_rules! debug {
+    ($($arg:tt)*) => {{
+        if $crate::options::debug_enabled() {
+            let _ = $crate::console::write(core::format_args!($($arg)*));
+        }
+    }};
+}
+
+#[macro_export]
+macro_rules! debugln {
+    () => {{
+        if $crate::options::debug_enabled() {
+            let _ = $crate::console::write(core::format_args!("\n"));
+        }
+    }};
+    ($fmt:expr $(, $arg:expr)* $(,)?) => {{
+        if $crate::options::debug_enabled() {
+            let _ = $crate::console::write(core::format_args!(concat!($fmt, "\n") $(, $arg)*));
+        }
+    }};
+}
+
+#[macro_export]
+macro_rules! debug_structured {
+    ($fmt:expr, [$(( $key:expr, $value:expr )),* $(,)?] $(, $arg:expr)*) => {{
+        if $crate::options::debug_enabled() {
+            $crate::println!($fmt $(, $arg)*);
+            $(
+                $crate::println!("  {}={}", $key, $value);
+            )*
+        }
+    }};
+}
+
 fn format_timestamp_prefix(buf: &mut [u8; TIMESTAMP_PREFIX_MAX], timestamp: Timestamp) -> usize {
     let mut index = 0;
     buf[index] = b'[';

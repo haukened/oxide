@@ -256,11 +256,13 @@ pub fn initialize(
     let storage_plan = allocator::runtime_storage_plan(&kernel_memory_map, reservation_hint)
         .map_err(MemoryInitError::Allocator)?;
 
-    crate::diagln!(
-        "runtime allocator storage plan: free {} reserved {} (hinted reservations {})",
-        storage_plan.free_slots,
-        storage_plan.reserved_slots,
-        reservation_hint
+    crate::debug_structured!(
+        "Storage plan:",
+        [
+            ("free slots", storage_plan.free_slots),
+            ("reserved slots", storage_plan.reserved_slots),
+            ("hinted reservations", reservation_hint),
+        ]
     );
 
     let StorageSlice {
@@ -279,7 +281,7 @@ pub fn initialize(
     };
     reservations.push((reserved_region.start, reserved_region.end))?;
 
-    crate::diagln!(
+    crate::debugln!(
         "runtime allocator storage carved: reservations now {}",
         reservations.len()
     );
@@ -405,12 +407,14 @@ fn log_identity_alignment(ranges: &[(u64, u64)]) {
     for &(start, end) in ranges {
         let aligned_start = start & !(HUGE_PAGE_SIZE - 1);
         let aligned_end = (end + HUGE_PAGE_SIZE - 1) & !(HUGE_PAGE_SIZE - 1);
-        crate::diagln!(
-            "Mapping identity range [{:#x}, {:#x}] aligned to [{:#x}, {:#x}]",
-            start,
-            end,
-            aligned_start,
-            aligned_end
+        crate::debug_structured!(
+            "Mapping identity range:",
+            [
+                ("requested_start", start),
+                ("requested_end", end),
+                ("aligned_start", aligned_start),
+                ("aligned_end", aligned_end),
+            ]
         );
     }
 }

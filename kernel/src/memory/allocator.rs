@@ -87,11 +87,13 @@ pub fn runtime_storage_plan(
 
     let reserved_slots = reservation_count.saturating_add(conventional_regions.max(4));
 
-    crate::diagln!(
-        "runtime storage plan: entries {} conventional {} reservations {}",
-        map.entry_count,
-        conventional_regions,
-        reservation_count
+    crate::debug_structured!(
+        "runtime storage plan:",
+        [
+            ("entries", map.entry_count),
+            ("conventional", conventional_regions),
+            ("reservations", reservation_count),
+        ]
     );
 
     Ok(StoragePlan {
@@ -491,10 +493,9 @@ impl<'a> PhysicalAllocator<'a> {
 
         let free_run_len = free.len();
         let free_run_capacity = free.capacity();
-        crate::diagln!(
-            "runtime allocator free runs populated: {} used / {} capacity",
-            free_run_len,
-            free_run_capacity
+        crate::debug_structured!(
+            "runtime allocator free runs populated:",
+            [("used", free_run_len), ("capacity", free_run_capacity),]
         );
 
         if free.len() == 0 {
@@ -514,10 +515,9 @@ impl<'a> PhysicalAllocator<'a> {
 
         let reserved_count = reserved.len();
         let free_remaining = free.len();
-        crate::diagln!(
-            "runtime allocator reservations applied: {} tracked, {} free runs remain",
-            reserved_count,
-            free_remaining
+        crate::debug_structured!(
+            "runtime allocator reservations applied:",
+            [("used", reserved_count), ("free", free_remaining)]
         );
 
         Ok(Self {
