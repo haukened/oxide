@@ -179,6 +179,79 @@ struct FrameRunList<'a> {
     len: usize,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct FrameSpan {
+    start: u64,
+    end: u64,
+}
+
+impl FrameSpan {
+    fn new(start: u64, end: u64) -> Result<Self, PhysAllocError> {
+        if start >= end {
+            return Err(PhysAllocError::RangeMisaligned { start, end });
+        }
+
+        if !start.is_multiple_of(FRAME_SIZE) || !end.is_multiple_of(FRAME_SIZE) {
+            return Err(PhysAllocError::RangeMisaligned { start, end });
+        }
+
+        Ok(Self { start, end })
+    }
+
+    fn from_frame(frame: PhysFrame) -> Result<Self, PhysAllocError> {
+        if frame.count == 0 {
+            return Err(PhysAllocError::RangeMisaligned {
+                start: frame.start,
+                end: frame.start,
+            });
+        }
+
+        let end =
+            span_end(frame.start, frame.count).ok_or_else(|| PhysAllocError::RangeOverflow {
+                start: frame.start,
+                end: frame
+                    .start
+                    .saturating_add(frame.count.saturating_mul(FRAME_SIZE)),
+            })?;
+
+        Self::new(frame.start, end)
+    }
+
+    fn merge(self, other: Self) -> Result<Self, PhysAllocError> {
+        let start = min(self.start, other.start);
+        let end = max(self.end, other.end);
+        Self::new(start, end)
+    }
+
+    fn overlaps(&self, other: &Self) -> bool {
+        self.start < other.end && other.start < self.end
+    }
+
+    fn frame_count(&self) -> Result<u64, PhysAllocError> {
+        let span = self
+            .end
+            .checked_sub(self.start)
+            .ok_or(PhysAllocError::RangeOverflow {
+                start: self.start,
+                end: self.end,
+            })?;
+
+        if span % FRAME_SIZE != 0 {
+            return Err(PhysAllocError::RangeMisaligned {
+                start: self.start,
+                end: self.end,
+            });
+        }
+
+        Ok(span / FRAME_SIZE)
+    }
+
+    fn into_frame(self) -> Result<PhysFrame, PhysAllocError> {
+        let count = self.frame_count()?;
+        Ok(PhysFrame::new(self.start, count))
+    }
+}
+
 impl<'a> FrameRunList<'a> {
     fn new(storage: &'a mut [Option<PhysFrame>]) -> Self {
         storage.fill(None);
@@ -229,56 +302,10 @@ impl<'a> FrameRunList<'a> {
             return Ok(());
         }
 
-        let mut new_start = frame.start;
-        let mut new_end =
-            span_end(frame.start, frame.count).ok_or_else(|| PhysAllocError::RangeOverflow {
-                start: frame.start,
-                end: frame
-                    .start
-                    .saturating_add(frame.count.saturating_mul(FRAME_SIZE)),
-            })?;
+        let initial_span = FrameSpan::from_frame(frame)?;
+        let merged_span = self.coalesce_span(initial_span)?;
 
-        for slot in self.entries.iter_mut() {
-            if let Some(existing) = slot {
-                let existing_start = existing.start;
-                let existing_end = match span_end(existing.start, existing.count) {
-                    Some(end) => end,
-                    None => {
-                        return Err(PhysAllocError::RangeOverflow {
-                            start: existing.start,
-                            end: existing
-                                .start
-                                .saturating_add(existing.count.saturating_mul(FRAME_SIZE)),
-                        });
-                    }
-                };
-
-                if new_end < existing_start || new_start > existing_end {
-                    continue;
-                }
-
-                new_start = new_start.min(existing_start);
-                new_end = new_end.max(existing_end);
-                *slot = None;
-                self.len = self.len.saturating_sub(1);
-            }
-        }
-
-        let span = new_end
-            .checked_sub(new_start)
-            .ok_or(PhysAllocError::RangeOverflow {
-                start: new_start,
-                end: new_end,
-            })?;
-        if span % FRAME_SIZE != 0 {
-            return Err(PhysAllocError::RangeMisaligned {
-                start: new_start,
-                end: new_end,
-            });
-        }
-
-        let count = span / FRAME_SIZE;
-        self.push(PhysFrame::new(new_start, count))
+        self.push_span(merged_span)
     }
 
     fn allocate_count(&mut self, frames: u64) -> Result<Option<PhysFrame>, PhysAllocError> {
@@ -324,6 +351,44 @@ impl<'a> FrameRunList<'a> {
         }
 
         Ok(None)
+    }
+
+    fn coalesce_span(&mut self, mut span: FrameSpan) -> Result<FrameSpan, PhysAllocError> {
+        while let Some(index) = self.first_overlapping_index(&span)? {
+            let existing = self.take_span(index)?;
+            span = span.merge(existing)?;
+        }
+
+        Ok(span)
+    }
+
+    fn first_overlapping_index(&self, span: &FrameSpan) -> Result<Option<usize>, PhysAllocError> {
+        for (idx, slot) in self.entries.iter().enumerate() {
+            let Some(run) = slot else { continue };
+            let existing_span = FrameSpan::from_frame(*run)?;
+            if span.overlaps(&existing_span) {
+                return Ok(Some(idx));
+            }
+        }
+
+        Ok(None)
+    }
+
+    fn take_span(&mut self, index: usize) -> Result<FrameSpan, PhysAllocError> {
+        let slot = self
+            .entries
+            .get_mut(index)
+            .ok_or(PhysAllocError::OutOfMemory)?; // invalid index indicates corrupted state
+
+        let run = slot.take().ok_or(PhysAllocError::OutOfMemory)?;
+        self.len = self.len.saturating_sub(1);
+
+        FrameSpan::from_frame(run)
+    }
+
+    fn push_span(&mut self, span: FrameSpan) -> Result<(), PhysAllocError> {
+        let frame = span.into_frame()?;
+        self.push(frame)
     }
 
     fn subtract_range(&mut self, start: u64, end: u64) -> Result<(), PhysAllocError> {
