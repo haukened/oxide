@@ -63,7 +63,9 @@ fn kernel_run(boot_abi_ptr: *const BootAbi) -> Result<(), KernelError> {
     time::init_tsc_monotonic(boot_abi.tsc_frequency_hz);
 
     crate::println!("Oxide kernel starting...");
-    crate::diagln!("Detected CPU frequency: {} Hz", boot_abi.tsc_frequency_hz);
+
+    let (freq, unit) = human_readable_hz(boot_abi.tsc_frequency_hz);
+    crate::diagln!("Detected CPU frequency: {:.2} {}", freq, unit);
 
     init::initialize(&memory_map, &framebuffer)?;
 
@@ -96,5 +98,22 @@ impl From<MemoryInitError> for KernelError {
 impl From<FrameAllocError> for KernelError {
     fn from(err: FrameAllocError) -> Self {
         KernelError::FrameAlloc(err)
+    }
+}
+
+fn human_readable_hz(freq_hz: u64) -> (f64, &'static str) {
+    const KHZ: f64 = 1_000.0;
+    const MHZ: f64 = 1_000_000.0;
+    const GHZ: f64 = 1_000_000_000.0;
+
+    let freq = freq_hz as f64;
+    if freq >= GHZ {
+        (freq / GHZ, "GHz")
+    } else if freq >= MHZ {
+        (freq / MHZ, "MHz")
+    } else if freq >= KHZ {
+        (freq / KHZ, "kHz")
+    } else {
+        (freq, "Hz")
     }
 }
