@@ -349,7 +349,7 @@ macro_rules! fb_println {
     () => {{
         let _ = $crate::console::write(core::format_args!("\n"));
     }};
-    ($fmt:expr $(, $arg:tt)*) => {{
+    ($fmt:expr $(, $arg:expr)* $(,)?) => {{
         let _ = $crate::console::write(core::format_args!(concat!($fmt, "\n") $(, $arg)*));
     }};
 }
@@ -370,7 +370,7 @@ macro_rules! fb_diagln {
             let _ = $crate::console::write(core::format_args!("\n"));
         }
     }};
-    ($fmt:expr $(, $arg:tt)*) => {{
+    ($fmt:expr $(, $arg:expr)* $(,)?) => {{
         if $crate::options::diagnostics_enabled() {
             let _ = $crate::console::write(core::format_args!(concat!($fmt, "\n") $(, $arg)*));
         }
