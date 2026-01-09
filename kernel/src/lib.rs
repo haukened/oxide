@@ -81,7 +81,7 @@ fn kernel_run(boot_abi_ptr: *const BootAbi) -> Result<(), KernelError> {
     Ok(())
 }
 
-#[cfg(feature = "standalone")]
+#[cfg(all(feature = "standalone", not(feature = "dep-loader")))]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop {
