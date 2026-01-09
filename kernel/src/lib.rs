@@ -62,11 +62,8 @@ fn kernel_run(boot_abi_ptr: *const BootAbi) -> Result<(), KernelError> {
 
     time::init_tsc_monotonic(boot_abi.tsc_frequency_hz);
 
-    crate::fb_diagln!("Oxide kernel starting...");
-
-    crate::fb_diagln!(
-        "Testing framebuffer font: 1234567890 ABCDEFGHIJKLMNOPQRSTUVWXYZ !@#$%^&*()-=_+[];:\"\',.?<>/\\|"
-    );
+    crate::fb_println!("Oxide kernel starting...");
+    crate::fb_diagln!("Detected CPU frequency: {} Hz", boot_abi.tsc_frequency_hz);
 
     init::initialize(&memory_map, &framebuffer)?;
 
