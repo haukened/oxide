@@ -1,6 +1,7 @@
 use crate::memory::frame::FRAME_SIZE;
 use oxide_abi::{MemoryDescriptor, MemoryMap};
 
+/// Iterator over firmware memory descriptors backed by a raw buffer.
 pub struct MemoryMapIter<'a> {
     base: usize,
     entry_size: usize,
@@ -9,6 +10,7 @@ pub struct MemoryMapIter<'a> {
 }
 
 impl<'a> MemoryMapIter<'a> {
+    /// Construct an iterator for the given memory-map snapshot.
     pub fn new(map: &'a MemoryMap) -> Self {
         Self {
             base: map.descriptors_phys as usize,
@@ -19,12 +21,14 @@ impl<'a> MemoryMapIter<'a> {
     }
 }
 
+/// Compute the inclusive-exclusive physical byte range described by the entry.
 pub fn descriptor_range(desc: &MemoryDescriptor) -> Option<(u64, u64)> {
     let len = desc.number_of_pages.checked_mul(FRAME_SIZE)?;
     let end = desc.physical_start.checked_add(len)?;
     Some((desc.physical_start, end))
 }
 
+/// Locate the descriptor that covers the supplied physical address.
 pub fn find_descriptor_containing<'a>(
     map: &'a MemoryMap,
     addr: u64,

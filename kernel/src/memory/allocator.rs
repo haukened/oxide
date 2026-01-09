@@ -41,12 +41,14 @@ pub struct ReservedRegion {
     pub end: u64,
 }
 
+/// Capacities required to host allocator bookkeeping structures.
 pub struct StoragePlan {
     pub free_slots: usize,
     pub reserved_slots: usize,
 }
 
 impl StoragePlan {
+    /// Total number of optional slots required across free and reserved lists.
     pub fn total_slots(&self) -> usize {
         self.free_slots.saturating_add(self.reserved_slots)
     }
@@ -144,6 +146,7 @@ unsafe impl Sync for AllocatorCell {}
 
 static GLOBAL_ALLOCATOR: AllocatorCell = AllocatorCell::new();
 
+/// Install the global physical allocator using the provided storage slices.
 pub fn initialize_runtime_allocator(
     map: MemoryMap,
     reservations: &[ReservedRegion],
@@ -153,6 +156,7 @@ pub fn initialize_runtime_allocator(
     GLOBAL_ALLOCATOR.initialize(map, reservations, free_storage, reserved_storage)
 }
 
+/// Execute a closure with mutable access to the global physical allocator.
 pub fn with_runtime_allocator<R>(
     f: impl FnOnce(&mut PhysicalAllocator<'static>) -> R,
 ) -> Option<R> {

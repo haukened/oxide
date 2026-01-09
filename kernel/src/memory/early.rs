@@ -83,6 +83,7 @@ unsafe impl Sync for ReservationCell {}
 static EARLY_RESERVATIONS: ReservationCell =
     ReservationCell(UnsafeCell::new(ReservationList::new()));
 
+/// Allocate a physical region during early boot and record it as reserved.
 pub fn allocate_region(map: &MemoryMap, bytes: usize) -> Result<ReservedRegion, MemoryInitError> {
     if bytes == 0 {
         return Err(MemoryInitError::TooLarge);
@@ -144,6 +145,7 @@ pub(crate) fn contains_address(addr: u64) -> Option<ReservedRegion> {
     unsafe { (*EARLY_RESERVATIONS.0.get()).contains(addr) }
 }
 
+/// Iterate over all early reservations in insertion order.
 pub fn for_each<F>(mut f: F)
 where
     F: FnMut(ReservedRegion),

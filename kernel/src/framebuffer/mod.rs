@@ -1,3 +1,5 @@
+//! Framebuffer drawing primitives shared across the kernel.
+
 use oxide_abi::Framebuffer;
 
 mod draw;
@@ -7,6 +9,7 @@ pub mod text;
 pub use draw::FramebufferColor;
 pub use font::{FONT_HEIGHT, FONT_WIDTH, glyph_for};
 
+/// Clear the entire framebuffer to black using defensive bounds checking.
 pub fn clear_framebuffer(fb: &Framebuffer) -> Result<(), ()> {
     draw::clear_black(fb)
 }

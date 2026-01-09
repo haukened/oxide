@@ -19,6 +19,7 @@ pub(crate) fn sanitize_byte(byte: u8) -> u8 {
     }
 }
 
+/// Text console that renders glyphs into a UEFI-provided linear framebuffer.
 pub struct FramebufferConsole {
     surface: FramebufferSurface,
     viewport: Viewport,

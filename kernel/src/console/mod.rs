@@ -1,3 +1,5 @@
+//! Framebuffer-backed kernel console with timestamped history.
+
 use core::{cell::UnsafeCell, cmp::min, fmt, mem};
 
 use oxide_abi::Framebuffer;
@@ -35,15 +37,22 @@ impl LineSlot {
     }
 }
 
+/// Backing storage for the console's persistent line history.
 pub struct ConsoleStorage {
     slots: &'static mut [LineSlot],
 }
 
 impl ConsoleStorage {
+    /// Returns the number of bytes required to store the history buffer.
     pub const fn required_bytes() -> usize {
         HISTORY_CAPACITY * mem::size_of::<LineSlot>()
     }
 
+    /// Interpret the physical memory at `start` as console storage.
+    ///
+    /// # Safety
+    /// The caller must guarantee the region is appropriately sized and mapped
+    /// for exclusive console use.
     pub unsafe fn from_physical(start: u64) -> Self {
         let ptr = start as *mut LineSlot;
         let slots = unsafe { core::slice::from_raw_parts_mut(ptr, HISTORY_CAPACITY) };
@@ -58,6 +67,7 @@ impl ConsoleStorage {
     }
 }
 
+/// Errors produced when initialising the global console.
 #[derive(Debug)]
 pub enum ConsoleInitError {
     AlreadyInitialized,
@@ -70,6 +80,7 @@ unsafe impl Sync for ConsoleCell {}
 
 static CONSOLE_STATE: ConsoleCell = ConsoleCell(UnsafeCell::new(None));
 
+/// Install the framebuffer console using the provided storage and colour.
 pub fn init(
     framebuffer: Framebuffer,
     color: FramebufferColor,
@@ -103,6 +114,7 @@ pub fn init(
     }
 }
 
+/// Forward formatted output into the global console, if initialised.
 pub fn write(args: fmt::Arguments<'_>) -> fmt::Result {
     unsafe {
         let state_slot = &mut *CONSOLE_STATE.0.get();

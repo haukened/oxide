@@ -127,6 +127,7 @@ struct StorageSlice<T: 'static> {
     region: ReservedRegion,
 }
 
+/// Reserve physical memory for the console's history buffer prior to allocator bring-up.
 pub fn bootstrap_console_storage(map: &MemoryMap) -> Result<ConsoleStorage, MemoryInitError> {
     let bytes = ConsoleStorage::required_bytes();
     let region = early::allocate_region(map, bytes)?;
@@ -185,6 +186,7 @@ unsafe fn carve_option_storage<T: Copy + 'static>(
     })
 }
 
+/// Perform early kernel memory initialisation and install identity paging.
 pub fn initialize(
     memory_map: &MemoryMap,
     framebuffer: &Framebuffer,

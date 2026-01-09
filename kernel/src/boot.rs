@@ -1,7 +1,10 @@
+//! Validation helpers for the loader-to-kernel handoff.
+
 use core::mem::{align_of, size_of};
 
 use oxide_abi::{ABI_VERSION, BootAbi, Framebuffer, MemoryDescriptor, MemoryMap, PixelFormat};
 
+/// Errors that can occur while validating loader-provided boot data.
 #[derive(Debug)]
 pub enum BootValidationError {
     VersionMismatch { expected: u32, found: u32 },
@@ -9,6 +12,10 @@ pub enum BootValidationError {
     MemoryMapInvalid(&'static str),
 }
 
+/// Validate the loader handoff structure before the kernel touches its fields.
+///
+/// Ensures the ABI version matches, framebuffer geometry is sane, and the
+/// memory-map metadata falls within expected bounds.
 pub fn validate_boot_abi(abi: &BootAbi) -> Result<(), BootValidationError> {
     if abi.version != ABI_VERSION {
         return Err(BootValidationError::VersionMismatch {
