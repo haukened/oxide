@@ -48,7 +48,7 @@ impl From<FirmwareInfo> for Firmware {
 pub fn get_info() -> FirmwareInfo {
     let vendor16 = system::firmware_vendor();
     let revision = system::firmware_revision();
-    let (vendor, vendor_len, vendor_truncated) = copy_vendor_string(&vendor16);
+    let (vendor, vendor_len, vendor_truncated) = copy_vendor_string(vendor16);
 
     FirmwareInfo {
         revision,

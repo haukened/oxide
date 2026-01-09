@@ -16,7 +16,7 @@ pub fn alloc_abi_struct() -> uefi::Result<*mut BootAbi> {
     // Round up to whole pages
     let abi_size = size_of::<BootAbi>();
     let page_size = 4096;
-    let pages = (abi_size + page_size - 1) / page_size;
+    let pages = abi_size.div_ceil(page_size);
 
     // Allocate physically contiguous pages for the ABI structure
     // use LOADER_DATA so the kernel can access it after EBS
@@ -53,7 +53,7 @@ fn convert_memory_map(mem: MemoryMapOwned) -> oxide_abi::MemoryMap {
         // The reported memory descriptor size.
         entry_size: meta.desc_size as u32,
         // the version of the descriptor structure
-        entry_version: meta.desc_version as u32,
+        entry_version: meta.desc_version,
         // number of keys in the map
         entry_count: mem.len() as u32,
     };
