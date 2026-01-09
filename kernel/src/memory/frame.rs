@@ -34,7 +34,7 @@ impl<'a> FrameAllocator<'a> {
         let mut run_len = 0usize;
         let mut gap_info: Option<(u64, u64)> = None;
 
-        while let Some(frame) = self.iter.next() {
+        for frame in self.iter.by_ref() {
             match run_start {
                 None => {
                     run_start = Some(frame);
@@ -65,11 +65,10 @@ impl<'a> FrameAllocator<'a> {
                 }
             }
 
-            if run_len == frame_count {
-                if let Some(start) = run_start {
+            if run_len == frame_count
+                && let Some(start) = run_start {
                     return Ok(start);
                 }
-            }
         }
 
         if let Some((expected, found)) = gap_info {

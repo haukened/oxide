@@ -95,7 +95,7 @@ fn validate_memory_map(map: &MemoryMap) -> Result<(), BootValidationError> {
     }
 
     let required_alignment = align_of::<MemoryDescriptor>() as u64;
-    if required_alignment > 0 && map.descriptors_phys % required_alignment != 0 {
+    if required_alignment > 0 && !map.descriptors_phys.is_multiple_of(required_alignment) {
         return Err(BootValidationError::MemoryMapInvalid(
             "descriptor buffer address not aligned",
         ));
@@ -123,7 +123,7 @@ fn validate_memory_map(map: &MemoryMap) -> Result<(), BootValidationError> {
     }
 
     let entry_size = map.entry_size as u64;
-    if map.map_size % entry_size != 0 {
+    if !map.map_size.is_multiple_of(entry_size) {
         return Err(BootValidationError::MemoryMapInvalid(
             "map size not divisible by entry size",
         ));

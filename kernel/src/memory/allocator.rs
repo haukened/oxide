@@ -69,8 +69,8 @@ pub fn runtime_storage_plan(
 
     // Count the number of conventional memory regions in the map
     let mut conventional_regions = 0usize;
-    let mut count_iter = MemoryMapIter::new(map);
-    while let Some(descriptor) = count_iter.next() {
+    let count_iter = MemoryMapIter::new(map);
+    for descriptor in count_iter {
         if descriptor.typ == EfiMemoryType::ConventionalMemory as u32
             && descriptor.number_of_pages > 0
         {
@@ -197,7 +197,7 @@ impl<'a> FrameRunList<'a> {
     }
 
     fn as_slice(&self) -> &[Option<PhysFrame>] {
-        &self.entries
+        self.entries
     }
 
     fn push(&mut self, frame: PhysFrame) -> Result<(), PhysAllocError> {
@@ -219,10 +219,8 @@ impl<'a> FrameRunList<'a> {
     }
 
     fn remove_slot(&mut self, index: usize) {
-        if index < self.entries.len() {
-            if self.entries[index].take().is_some() {
-                self.len = self.len.saturating_sub(1);
-            }
+        if index < self.entries.len() && self.entries[index].take().is_some() {
+            self.len = self.len.saturating_sub(1);
         }
     }
 
@@ -435,7 +433,7 @@ impl<'a> ReservedList<'a> {
     }
 
     fn as_slice(&self) -> &[Option<ReservedRegion>] {
-        &self.entries
+        self.entries
     }
 
     fn push(&mut self, region: ReservedRegion) -> Result<(), PhysAllocError> {
@@ -644,6 +642,6 @@ fn align_up(value: u64) -> u64 {
     let mask = FRAME_SIZE - 1;
     match value.checked_add(mask) {
         Some(sum) => sum & !mask,
-        None => u64::MAX & !mask,
+        None => !mask,
     }
 }

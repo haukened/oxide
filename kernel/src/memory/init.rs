@@ -9,7 +9,7 @@ use crate::memory::map::{descriptor_range, find_descriptor_containing};
 use crate::memory::paging::{HUGE_PAGE_SIZE, install_identity_paging};
 use oxide_abi::{Framebuffer, MemoryMap};
 
-const LOW_IDENTITY_LIMIT: u64 = 1 * 1024 * 1024 * 1024; // 1 GiB
+const LOW_IDENTITY_LIMIT: u64 = 1024 * 1024 * 1024; // 1 GiB
 /// Identity ranges are limited because the install path only needs a few
 /// critical regions (map copy, stack, kernel image, occasional extras).
 /// This keeps the staging structure stack-allocated with predictable size.
@@ -33,9 +33,7 @@ impl IdentityRanges {
             return Ok(());
         }
 
-        if self.entries[..self.len]
-            .iter()
-            .any(|&existing| existing == range)
+        if self.entries[..self.len].contains(&range)
         {
             return Ok(());
         }
@@ -85,9 +83,7 @@ impl ReservationList {
 
         let region = ReservedRegion { start, end };
 
-        if self.entries[..self.len]
-            .iter()
-            .any(|&existing| existing == region)
+        if self.entries[..self.len].contains(&region)
         {
             return Ok(());
         }
@@ -160,7 +156,7 @@ unsafe fn carve_option_storage<T: Copy + 'static>(
         .ok_or(MemoryInitError::TooLarge)?;
 
     let frame_bytes = FRAME_SIZE as usize;
-    let frames = ((bytes + frame_bytes - 1) / frame_bytes).max(1);
+    let frames = bytes.div_ceil(frame_bytes).max(1);
 
     let phys_start = allocator
         .alloc_contiguous(frames)
@@ -232,11 +228,10 @@ pub fn initialize(
 
     let mut early_reservation_error = None;
     early::for_each(|region| {
-        if early_reservation_error.is_none() {
-            if let Err(err) = reservations.push((region.start, region.end)) {
+        if early_reservation_error.is_none()
+            && let Err(err) = reservations.push((region.start, region.end)) {
                 early_reservation_error = Some(err);
             }
-        }
     });
     if let Some(err) = early_reservation_error {
         return Err(err);
@@ -245,7 +240,7 @@ pub fn initialize(
     let framebuffer_end = framebuffer
         .base_address
         .checked_add(framebuffer.buffer_size)
-        .ok_or_else(|| {
+        .ok_or({
             MemoryInitError::Paging(PagingError::AddressOverflow(
                 framebuffer.base_address,
                 framebuffer.buffer_size,
@@ -335,7 +330,7 @@ fn copy_memory_map(
     if map_size > usize::MAX as u64 {
         return Err(MemoryInitError::TooLarge);
     }
-    let frame_count = ((map_size + FRAME_SIZE - 1) / FRAME_SIZE) as usize;
+    let frame_count = map_size.div_ceil(FRAME_SIZE) as usize;
 
     if frame_count == 0 {
         return Err(MemoryInitError::EmptyMemoryMap);

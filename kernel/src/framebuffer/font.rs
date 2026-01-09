@@ -9,7 +9,7 @@
 pub const FONT_WIDTH: usize = 8;
 pub const FONT_HEIGHT: usize = 16;
 
-const GLYPH_LOOKUP: [&'static [u8; FONT_HEIGHT]; 128] = build_glyph_lookup();
+const GLYPH_LOOKUP: [&[u8; FONT_HEIGHT]; 128] = build_glyph_lookup();
 
 pub fn glyph_for(byte: u8) -> &'static [u8; FONT_HEIGHT] {
     GLYPH_LOOKUP

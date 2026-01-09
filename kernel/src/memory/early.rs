@@ -54,21 +54,19 @@ impl ReservationList {
     }
 
     fn overlaps(&self, region: ReservedRegion) -> Option<ReservedRegion> {
-        for &existing in &self.entries[..self.len] {
-            if ranges_overlap(existing.start, existing.end, region.start, region.end) {
-                return Some(existing);
-            }
-        }
-        None
+        self.entries[..self.len]
+            .iter()
+            .find(|&&existing| {
+                ranges_overlap(existing.start, existing.end, region.start, region.end)
+            })
+            .copied()
     }
 
     fn contains(&self, addr: u64) -> Option<ReservedRegion> {
-        for &existing in &self.entries[..self.len] {
-            if addr >= existing.start && addr < existing.end {
-                return Some(existing);
-            }
-        }
-        None
+        self.entries[..self.len]
+            .iter()
+            .find(|&&existing| addr >= existing.start && addr < existing.end)
+            .copied()
     }
 
     fn iter(&self) -> impl Iterator<Item = ReservedRegion> + '_ {
@@ -91,8 +89,8 @@ pub fn allocate_region(map: &MemoryMap, bytes: usize) -> Result<ReservedRegion, 
 
     let alloc_bytes = align_up(bytes as u64, FRAME_SIZE).ok_or(MemoryInitError::TooLarge)?;
 
-    let mut iter = MemoryMapIter::new(map);
-    while let Some(descriptor) = iter.next() {
+    let iter = MemoryMapIter::new(map);
+    for descriptor in iter {
         if descriptor.typ != EfiMemoryType::ConventionalMemory as u32 {
             continue;
         }
