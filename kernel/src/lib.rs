@@ -64,6 +64,10 @@ fn kernel_run(boot_abi_ptr: *const BootAbi) -> Result<(), KernelError> {
 
     crate::fb_diagln!("Oxide kernel starting...");
 
+    crate::fb_diagln!(
+        "Testing framebuffer font: 1234567890 ABCDEFGHIJKLMNOPQRSTUVWXYZ !@#$%^&*()-=_+[];:\"\',.?<>/\\|"
+    );
+
     init::initialize(&memory_map, &framebuffer)?;
 
     crate::fb_diagln!("Memory subsystem init complete.");
