@@ -1,2 +1,4 @@
 [alias]
 loader = "build -r -p loader --target x86_64-unknown-uefi"
+kernel = "build -r -p oxide-kernel --target x86_64-unknown-uefi"
+cov = "llvm-cov --lcov --output-path lcov.info"
