@@ -3,6 +3,9 @@ members = [
   "loader",
   "kernel", "abi",
 ]
+default-members = [
+  "kernel"
+]
 resolver = "3"
 
 [profile.dev]
