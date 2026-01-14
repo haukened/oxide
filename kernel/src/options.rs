@@ -31,3 +31,31 @@ pub fn quiet_enabled() -> bool {
 pub fn diagnostics_enabled() -> bool {
     debug_enabled() && !quiet_enabled()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_options_flags() {
+        init(Options { debug: 1, quiet: 0 });
+        assert!(debug_enabled());
+        assert!(!quiet_enabled());
+        assert!(diagnostics_enabled());
+
+        init(Options { debug: 0, quiet: 1 });
+        assert!(!debug_enabled());
+        assert!(quiet_enabled());
+        assert!(!diagnostics_enabled());
+
+        init(Options { debug: 1, quiet: 1 });
+        assert!(debug_enabled());
+        assert!(quiet_enabled());
+        assert!(!diagnostics_enabled());
+
+        init(Options { debug: 0, quiet: 0 });
+        assert!(!debug_enabled());
+        assert!(!quiet_enabled());
+        assert!(!diagnostics_enabled());
+    }
+}
