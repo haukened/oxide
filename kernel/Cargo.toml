@@ -8,7 +8,6 @@ dep-loader = []
 
 [lib]
 crate-type = ["rlib"]
-test = false
 bench = false
 
 [dependencies]
