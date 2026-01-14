@@ -447,6 +447,149 @@ fn read_cr2() -> u64 {
 extern crate std;
 
 mod tests {
+    #[allow(dead_code)]
+    extern "C" fn dummy_handler() {}
+
+    #[test]
+    fn gate_options_interrupt_defaults() {
+        let options = super::GateOptions::interrupt();
+        assert_eq!(options.type_attr, 0b1000_1110);
+        assert_eq!(options.ist, 0);
+    }
+
+    #[test]
+    fn gate_options_trap_defaults() {
+        let options = super::GateOptions::trap();
+        assert_eq!(options.type_attr, 0b1000_1111);
+        assert_eq!(options.ist, 0);
+    }
+
+    #[test]
+    fn gate_options_with_privilege_updates_dpl_bits() {
+        let options = super::GateOptions::interrupt().with_privilege(3);
+        assert_eq!(options.type_attr & 0b0110_0000, 0b0110_0000);
+    }
+
+    #[test]
+    fn gate_options_with_present_clears_bit_when_false() {
+        let options = super::GateOptions::interrupt().with_present(false);
+        assert_eq!(options.type_attr & 0b1000_0000, 0);
+    }
+
+    #[test]
+    fn gate_options_with_ist_masks_to_three_bits() {
+        let options = super::GateOptions::interrupt().with_ist(0b1010);
+        assert_eq!(options.ist, 0b010);
+    }
+
+    #[test]
+    fn interrupt_handler_from_fn_tracks_address() {
+        let handler = super::InterruptHandler::from_fn(dummy_handler);
+        assert_eq!(handler.addr, dummy_handler as usize);
+    }
+
+    #[test]
+    fn interrupt_handler_new_tracks_address() {
+        let handler = super::InterruptHandler::new(dummy_handler as usize);
+        assert_eq!(handler.addr, dummy_handler as usize);
+    }
+
+    #[test]
+    fn idt_new_initialises_all_entries_missing() {
+        let idt = super::Idt::new();
+        for entry in idt.entries.iter().copied() {
+            let super::IdtEntry {
+                offset_low,
+                selector,
+                ist,
+                type_attr,
+                offset_mid,
+                offset_high,
+                ..
+            } = entry;
+            assert_eq!(offset_low, 0);
+            assert_eq!(selector, 0);
+            assert_eq!(ist, 0);
+            assert_eq!(type_attr, 0);
+            assert_eq!(offset_mid, 0);
+            assert_eq!(offset_high, 0);
+        }
+    }
+
+    #[test]
+    fn idt_set_gate_populates_vector_entry() {
+        let mut idt = super::Idt::new();
+        let selector = 0x0028u16;
+        let options = super::GateOptions::interrupt().with_privilege(2);
+        let type_attr = options.type_attr;
+        let ist = options.ist;
+
+        idt.set_gate(
+            0x21,
+            super::InterruptHandler::from_fn(dummy_handler),
+            selector,
+            options,
+        );
+
+        let entry = idt.entries[0x21];
+        let handler_addr = dummy_handler as usize as u64;
+        let super::IdtEntry {
+            selector: actual_selector,
+            type_attr: actual_attr,
+            ist: actual_ist,
+            offset_low,
+            offset_mid,
+            offset_high,
+            ..
+        } = entry;
+        assert_eq!(actual_selector, selector);
+        assert_eq!(actual_attr, type_attr);
+        assert_eq!(actual_ist, ist);
+        assert_eq!(offset_low as u64, handler_addr & 0xFFFF);
+        assert_eq!(offset_mid as u64, (handler_addr >> 16) & 0xFFFF);
+        assert_eq!(offset_high as u64, (handler_addr >> 32) & 0xFFFF_FFFF);
+    }
+
+    #[test]
+    fn idt_clear_gate_resets_vector_entry() {
+        let mut idt = super::Idt::new();
+        let selector = 0x0028u16;
+        idt.set_gate(
+            0x10,
+            super::InterruptHandler::from_fn(dummy_handler),
+            selector,
+            super::GateOptions::interrupt(),
+        );
+        idt.clear_gate(0x10);
+
+        let entry = idt.entries[0x10];
+        let super::IdtEntry {
+            selector,
+            type_attr,
+            offset_low,
+            offset_mid,
+            offset_high,
+            ..
+        } = entry;
+        assert_eq!(selector, 0);
+        assert_eq!(type_attr, 0);
+        assert_eq!(offset_low, 0);
+        assert_eq!(offset_mid, 0);
+        assert_eq!(offset_high, 0);
+    }
+
+    #[test]
+    fn idt_pointer_new_matches_entry_slice_layout() {
+        let entries = [super::IdtEntry::missing(); super::IDT_ENTRIES];
+        let pointer = super::IdtPointer::new(&entries);
+        let expected_limit =
+            (core::mem::size_of::<super::IdtEntry>() * super::IDT_ENTRIES - 1) as u16;
+        let expected_base = entries.as_ptr() as u64;
+        let super::IdtPointer { limit, base } = pointer;
+        assert_eq!(limit, expected_limit);
+        assert_eq!(base, expected_base);
+    }
+
     #[test]
     fn sanity_test() {
         // this should unconditionally pass
