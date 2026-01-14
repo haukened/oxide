@@ -21,3 +21,8 @@ target
 #.idea/
 
 *.todo.md
+
+# coverage files
+*.lcov
+*.info
+coverage.out
