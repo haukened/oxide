@@ -1,8 +1,8 @@
 #![no_std]
-#![no_main]
-
+#![cfg_attr(not(test), no_main)]
 use oxide_abi::BootAbi;
 
+use crate::interrupts::InterruptInitError;
 use crate::memory::{
     error::{FrameAllocError, MemoryInitError},
     init,
@@ -11,6 +11,7 @@ use crate::memory::{
 mod boot;
 mod console;
 mod framebuffer;
+pub mod interrupts;
 mod memory;
 mod options;
 mod time;
@@ -76,12 +77,16 @@ fn kernel_run(boot_abi_ptr: *const BootAbi) -> Result<(), KernelError> {
 
     crate::diagln!("Memory subsystem init complete.");
 
+    interrupts::init(None)?;
+
+    crate::diagln!("Interrupt subsystem init complete.");
+
     crate::println!("Kernel: Entering epoch 2: Foundation.");
 
     Ok(())
 }
 
-#[cfg(not(feature = "dep-loader"))]
+#[cfg(all(not(test), not(feature = "dep-loader")))]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop {
@@ -95,6 +100,7 @@ pub enum KernelError {
     BootValidation(boot::BootValidationError),
     MemoryInit(MemoryInitError),
     FrameAlloc(FrameAllocError),
+    InterruptInit(InterruptInitError),
 }
 
 impl From<boot::BootValidationError> for KernelError {
@@ -112,6 +118,12 @@ impl From<MemoryInitError> for KernelError {
 impl From<FrameAllocError> for KernelError {
     fn from(err: FrameAllocError) -> Self {
         KernelError::FrameAlloc(err)
+    }
+}
+
+impl From<InterruptInitError> for KernelError {
+    fn from(err: InterruptInitError) -> Self {
+        KernelError::InterruptInit(err)
     }
 }
 
