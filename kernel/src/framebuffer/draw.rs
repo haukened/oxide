@@ -212,3 +212,147 @@ fn encode_pixel(format: PixelFormat, color: FramebufferColor) -> u32 {
         PixelFormat::Bgr => u32::from_le_bytes([b, g, r, 0xFF]),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    extern crate alloc;
+
+    use super::*;
+    use alloc::vec;
+
+    #[test]
+    fn framebuffer_color_components_round_trip() {
+        let color = FramebufferColor::new(0x12, 0x34, 0x56);
+        assert_eq!(color.components(), (0x12, 0x34, 0x56));
+    }
+
+    #[test]
+    fn encode_pixel_respects_rgb_format() {
+        let color = FramebufferColor::new(0xAA, 0xBB, 0xCC);
+        let encoded = super::encode_pixel(PixelFormat::Rgb, color);
+        assert_eq!(encoded, 0xFF_CC_BB_AA);
+    }
+
+    #[test]
+    fn encode_pixel_respects_bgr_format() {
+        let color = FramebufferColor::new(0x11, 0x22, 0x33);
+        let encoded = super::encode_pixel(PixelFormat::Bgr, color);
+        assert_eq!(encoded, 0xFF_11_22_33);
+    }
+
+    #[test]
+    fn framebuffer_surface_validate_rejects_invalid_geometry() {
+        let surface = FramebufferSurface {
+            base_ptr: core::ptr::null_mut(),
+            pitch: 1,
+            width: 1,
+            height: 1,
+            pixel_format: PixelFormat::Rgb,
+        };
+        assert!(surface.validate().is_err());
+    }
+
+    #[test]
+    fn fill_rect_blits_only_within_bounds() {
+        let pitch = 5;
+        let width = 5;
+        let height = 4;
+        let mut backing = vec![0u32; pitch * height];
+        let surface = FramebufferSurface {
+            base_ptr: backing.as_mut_ptr(),
+            pitch,
+            width,
+            height,
+            pixel_format: PixelFormat::Rgb,
+        };
+
+        let color = FramebufferColor::new(0x10, 0x20, 0x30);
+        super::fill_rect(surface, 1, 1, 3, 2, color).unwrap();
+
+        let encoded = super::encode_pixel(PixelFormat::Rgb, color);
+        for row in 0..height {
+            for col in 0..width {
+                let idx = row * pitch + col;
+                if (1..4).contains(&col) && (1..3).contains(&row) {
+                    assert_eq!(backing[idx], encoded);
+                } else {
+                    assert_eq!(backing[idx], 0);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fill_rect_rejects_out_of_bounds_origin() {
+        let pitch = 4;
+        let width = 4;
+        let height = 4;
+        let mut backing = vec![0u32; pitch * height];
+        let surface = FramebufferSurface {
+            base_ptr: backing.as_mut_ptr(),
+            pitch,
+            width,
+            height,
+            pixel_format: PixelFormat::Rgb,
+        };
+
+        let result = super::fill_rect(surface, width + 1, 0, 1, 1, FramebufferColor::WHITE);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn fill_rect_rejects_out_of_bounds_row() {
+        let pitch = 4;
+        let width = 4;
+        let height = 4;
+        let mut backing = vec![0u32; pitch * height];
+        let surface = FramebufferSurface {
+            base_ptr: backing.as_mut_ptr(),
+            pitch,
+            width,
+            height,
+            pixel_format: PixelFormat::Rgb,
+        };
+
+        let result = super::fill_rect(surface, 0, height, 1, 1, FramebufferColor::WHITE);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn fill_rect_rejects_origin_past_pitch() {
+        let pitch = 4;
+        let width = 6;
+        let height = 4;
+        let mut backing = vec![0u32; pitch * height];
+        let surface = FramebufferSurface {
+            base_ptr: backing.as_mut_ptr(),
+            pitch,
+            width,
+            height,
+            pixel_format: PixelFormat::Rgb,
+        };
+
+        let result = super::fill_rect(surface, pitch, 0, 1, 1, FramebufferColor::WHITE);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn draw_glyph_sets_pixels_for_known_character() {
+        let pitch = 8;
+        let width = 8;
+        let height = FONT_HEIGHT * 2;
+        let mut backing = vec![0u32; pitch * height];
+        let surface = FramebufferSurface {
+            base_ptr: backing.as_mut_ptr(),
+            pitch,
+            width,
+            height,
+            pixel_format: PixelFormat::Rgb,
+        };
+
+        let color = FramebufferColor::WHITE;
+        super::draw_glyph(surface, 0, 0, b'A', color).unwrap();
+        let encoded = super::encode_pixel(PixelFormat::Rgb, color);
+        assert!(backing.iter().any(|&pixel| pixel == encoded));
+    }
+}

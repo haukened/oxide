@@ -271,3 +271,69 @@ impl Viewport {
         Some((x, y))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oxide_abi::PixelFormat;
+
+    #[test]
+    fn sanitize_byte_filters_control_characters() {
+        assert_eq!(sanitize_byte(b'a'), b'A');
+        assert_eq!(sanitize_byte(b'Z'), b'Z');
+        assert_eq!(sanitize_byte(b'\n'), b'\n');
+        assert_eq!(sanitize_byte(b'\t'), b' ');
+        assert_eq!(sanitize_byte(0x1B), b'?');
+    }
+
+    #[test]
+    fn viewport_new_calculates_geometry() {
+        let surface = FramebufferSurface {
+            base_ptr: core::ptr::null_mut(),
+            pitch: 200,
+            width: 160,
+            height: 60,
+            pixel_format: PixelFormat::Rgb,
+        };
+        let viewport = Viewport::new(surface, 0, 0);
+        assert_eq!(viewport.cols, 160 / FONT_WIDTH);
+        assert_eq!(viewport.line_stride, FONT_HEIGHT + LINE_SPACING);
+        assert!(viewport.rows >= 1);
+    }
+
+    #[test]
+    fn viewport_pixel_position_within_bounds() {
+        let surface = FramebufferSurface {
+            base_ptr: core::ptr::null_mut(),
+            pitch: 200,
+            width: 160,
+            height: 80,
+            pixel_format: PixelFormat::Rgb,
+        };
+        let viewport = Viewport::new(surface, 10, 20);
+        let cursor = Cursor { col: 2, row: 1 };
+        let expected_x = 10 + 2 * FONT_WIDTH;
+        let expected_y = 20 + 1 * (FONT_HEIGHT + LINE_SPACING);
+        assert_eq!(
+            viewport.pixel_position(cursor),
+            Some((expected_x, expected_y))
+        );
+    }
+
+    #[test]
+    fn viewport_pixel_position_out_of_bounds_returns_none() {
+        let surface = FramebufferSurface {
+            base_ptr: core::ptr::null_mut(),
+            pitch: 40,
+            width: 80,
+            height: 40,
+            pixel_format: PixelFormat::Rgb,
+        };
+        let viewport = Viewport::new(surface, 0, 0);
+        let cursor = Cursor {
+            col: viewport.cols,
+            row: 0,
+        };
+        assert_eq!(viewport.pixel_position(cursor), None);
+    }
+}
