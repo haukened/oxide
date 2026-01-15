@@ -180,3 +180,125 @@ fn align_up(value: u64, align: u64) -> Option<u64> {
 fn ranges_overlap(a_start: u64, a_end: u64, b_start: u64, b_end: u64) -> bool {
     a_start < b_end && b_start < a_end
 }
+
+#[cfg(test)]
+mod tests {
+    extern crate alloc;
+
+    use super::*;
+    use alloc::{boxed::Box, vec, vec::Vec};
+    use oxide_abi::{EfiMemoryType, MemoryDescriptor, MemoryMap};
+
+    fn descriptor(typ: EfiMemoryType, physical_start: u64, pages: u64) -> MemoryDescriptor {
+        MemoryDescriptor {
+            typ: typ as u32,
+            _pad: 0,
+            physical_start,
+            virtual_start: 0,
+            number_of_pages: pages,
+            attribute: 0,
+        }
+    }
+
+    fn build_map(descriptors: Vec<MemoryDescriptor>) -> (MemoryMap, Box<[MemoryDescriptor]>) {
+        let entry_size = core::mem::size_of::<MemoryDescriptor>() as u32;
+        let entry_count = descriptors.len() as u32;
+        let backing: Box<[MemoryDescriptor]> = descriptors.into_boxed_slice();
+        let map = MemoryMap {
+            descriptors_phys: backing.as_ptr() as u64,
+            map_size: (entry_size as u64) * (entry_count as u64),
+            entry_size,
+            entry_version: 1,
+            entry_count,
+        };
+
+        (map, backing)
+    }
+
+    fn reset_reservations() {
+        unsafe {
+            *EARLY_RESERVATIONS.0.get() = ReservationList::new();
+        }
+    }
+
+    #[test]
+    fn reservation_list_push_orders_entries() {
+        let mut list = ReservationList::new();
+        list.push(ReservedRegion {
+            start: FRAME_SIZE * 3,
+            end: FRAME_SIZE * 4,
+        })
+        .unwrap();
+        list.push(ReservedRegion {
+            start: FRAME_SIZE,
+            end: FRAME_SIZE * 2,
+        })
+        .unwrap();
+        list.push(ReservedRegion {
+            start: FRAME_SIZE * 5,
+            end: FRAME_SIZE * 6,
+        })
+        .unwrap();
+
+        let collected: Vec<_> = list.iter().collect();
+        assert_eq!(collected[0].start, FRAME_SIZE);
+        assert_eq!(collected[1].start, FRAME_SIZE * 3);
+        assert_eq!(collected[2].start, FRAME_SIZE * 5);
+    }
+
+    #[test]
+    fn reservation_list_rejects_capacity_overflow() {
+        let mut list = ReservationList::new();
+        for idx in 0..MAX_EARLY_RESERVATIONS {
+            list.push(ReservedRegion {
+                start: FRAME_SIZE * (idx as u64 + 1),
+                end: FRAME_SIZE * (idx as u64 + 2),
+            })
+            .unwrap();
+        }
+
+        let overflow = list.push(ReservedRegion {
+            start: FRAME_SIZE * 100,
+            end: FRAME_SIZE * 101,
+        });
+        assert_eq!(overflow, Err(MemoryInitError::TooLarge));
+    }
+
+    #[test]
+    fn allocate_region_honors_existing_reservations() {
+        reset_reservations();
+        let descriptors = vec![descriptor(EfiMemoryType::ConventionalMemory, FRAME_SIZE, 8)];
+        let (map, _backing) = build_map(descriptors);
+
+        let first = allocate_region(&map, FRAME_SIZE as usize).unwrap();
+        let second = allocate_region(&map, FRAME_SIZE as usize).unwrap();
+
+        assert_eq!(first.start, FRAME_SIZE);
+        assert_eq!(first.end, FRAME_SIZE * 2);
+        assert_eq!(second.start, first.end);
+        assert_eq!(second.end, first.end + FRAME_SIZE);
+
+        let mut regions = Vec::new();
+        for_each(|region| regions.push(region));
+        assert_eq!(regions.len(), 2);
+        reset_reservations();
+    }
+
+    #[test]
+    fn allocate_region_rejects_zero_bytes() {
+        reset_reservations();
+        let descriptors = vec![descriptor(EfiMemoryType::ConventionalMemory, FRAME_SIZE, 1)];
+        let (map, _backing) = build_map(descriptors);
+
+        let result = allocate_region(&map, 0);
+        assert_eq!(result, Err(MemoryInitError::TooLarge));
+        reset_reservations();
+    }
+
+    #[test]
+    fn ranges_overlap_detects_intersection() {
+        assert!(ranges_overlap(0, 10, 5, 15));
+        assert!(!ranges_overlap(0, 5, 5, 10));
+        assert!(!ranges_overlap(10, 20, 0, 10));
+    }
+}

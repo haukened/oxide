@@ -700,3 +700,188 @@ fn align_up(value: u64) -> u64 {
         None => !mask,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    extern crate alloc;
+
+    use super::*;
+    use alloc::{boxed::Box, vec, vec::Vec};
+    use oxide_abi::{EfiMemoryType, MemoryDescriptor, MemoryMap};
+
+    fn descriptor(typ: EfiMemoryType, physical_start: u64, pages: u64) -> MemoryDescriptor {
+        MemoryDescriptor {
+            typ: typ as u32,
+            _pad: 0,
+            physical_start,
+            virtual_start: 0,
+            number_of_pages: pages,
+            attribute: 0,
+        }
+    }
+
+    fn build_map(descriptors: Vec<MemoryDescriptor>) -> (MemoryMap, Box<[MemoryDescriptor]>) {
+        let entry_size = core::mem::size_of::<MemoryDescriptor>() as u32;
+        let entry_count = descriptors.len() as u32;
+        let backing: Box<[MemoryDescriptor]> = descriptors.into_boxed_slice();
+        let map = MemoryMap {
+            descriptors_phys: backing.as_ptr() as u64,
+            map_size: (entry_size as u64) * (entry_count as u64),
+            entry_size,
+            entry_version: 1,
+            entry_count,
+        };
+
+        (map, backing)
+    }
+
+    #[test]
+    fn runtime_storage_plan_errors_on_empty_map() {
+        let map = MemoryMap {
+            descriptors_phys: 0,
+            map_size: 0,
+            entry_size: 0,
+            entry_version: 0,
+            entry_count: 0,
+        };
+
+        assert!(matches!(
+            runtime_storage_plan(&map, 0),
+            Err(PhysAllocInitError::Empty)
+        ));
+    }
+
+    #[test]
+    fn runtime_storage_plan_counts_conventional_regions() {
+        let descriptors = vec![
+            descriptor(EfiMemoryType::ConventionalMemory, FRAME_SIZE, 1),
+            descriptor(EfiMemoryType::LoaderCode, FRAME_SIZE * 4, 1),
+            descriptor(EfiMemoryType::ConventionalMemory, FRAME_SIZE * 8, 2),
+        ];
+        let (map, _backing) = build_map(descriptors);
+
+        let plan = runtime_storage_plan(&map, 3).unwrap();
+        assert_eq!(plan.free_slots, (2 + 3) * 2);
+        assert_eq!(plan.reserved_slots, 3 + 4);
+    }
+
+    #[test]
+    fn frame_span_validation_catches_errors() {
+        assert_eq!(
+            FrameSpan::new(0, 0).unwrap_err(),
+            PhysAllocError::RangeMisaligned { start: 0, end: 0 }
+        );
+
+        let overflow_frame = PhysFrame::new(u64::MAX - FRAME_SIZE + 1, 2);
+        assert!(matches!(
+            FrameSpan::from_frame(overflow_frame),
+            Err(PhysAllocError::RangeOverflow { .. })
+        ));
+
+        let span = FrameSpan::new(FRAME_SIZE, FRAME_SIZE * 3).unwrap();
+        let removal = FrameSpan::new(FRAME_SIZE * 2, FRAME_SIZE * 4).unwrap();
+        let (left, right) = span.subtract(&removal).unwrap();
+        assert_eq!(left.unwrap().end, FRAME_SIZE * 2);
+        assert!(right.is_none());
+    }
+
+    #[test]
+    fn frame_run_list_insert_coalesces_runs() {
+        let mut storage = vec![None; 4];
+        let mut runs = FrameRunList::new(&mut storage);
+        runs.insert(PhysFrame::new(FRAME_SIZE, 2)).unwrap();
+        runs.insert(PhysFrame::new(FRAME_SIZE * 2, 2)).unwrap();
+
+        let merged: Vec<_> = runs.iter().collect();
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].start, FRAME_SIZE);
+        assert_eq!(merged[0].count, 3);
+    }
+
+    #[test]
+    fn frame_run_list_allocate_and_split() {
+        let mut storage = vec![None; 2];
+        let mut runs = FrameRunList::new(&mut storage);
+        runs.insert(PhysFrame::new(FRAME_SIZE, 4)).unwrap();
+
+        let alloc = runs.allocate_count(2).unwrap();
+        assert_eq!(alloc.unwrap().start, FRAME_SIZE);
+        let remaining: Vec<_> = runs.iter().collect();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].start, FRAME_SIZE * 3);
+        assert_eq!(remaining[0].count, 2);
+    }
+
+    #[test]
+    fn frame_run_list_subtract_splits_range() {
+        let mut storage = vec![None; 4];
+        let mut runs = FrameRunList::new(&mut storage);
+        runs.insert(PhysFrame::new(FRAME_SIZE, 4)).unwrap();
+
+        runs.subtract_range(FRAME_SIZE * 2, FRAME_SIZE * 3).unwrap();
+        let mut spans: Vec<_> = runs.iter().collect();
+        spans.sort_by_key(|frame| frame.start);
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0], PhysFrame::new(FRAME_SIZE, 1));
+        assert_eq!(spans[1], PhysFrame::new(FRAME_SIZE * 3, 2));
+    }
+
+    #[test]
+    fn frame_run_list_rejects_zero_allocation() {
+        let mut storage = vec![None; 1];
+        let mut runs = FrameRunList::new(&mut storage);
+        runs.insert(PhysFrame::new(FRAME_SIZE, 1)).unwrap();
+        assert_eq!(
+            runs.allocate_count(0).unwrap_err(),
+            PhysAllocError::UnsupportedFrameCount { frames: 0 }
+        );
+    }
+
+    #[test]
+    fn physical_allocator_applies_reservations() {
+        let descriptors = vec![descriptor(EfiMemoryType::ConventionalMemory, FRAME_SIZE, 4)];
+        let (map, _backing) = build_map(descriptors);
+        let reservations = [ReservedRegion {
+            start: FRAME_SIZE * 2,
+            end: FRAME_SIZE * 3,
+        }];
+        let mut free_storage = vec![None; 8];
+        let mut reserved_storage = vec![None; 8];
+
+        let mut allocator = PhysicalAllocator::from_memory_map(
+            map,
+            &reservations,
+            free_storage.as_mut_slice(),
+            reserved_storage.as_mut_slice(),
+        )
+        .unwrap();
+
+        let mut runs: Vec<_> = allocator.free_regions().collect();
+        runs.sort_by_key(|frame| frame.start);
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0], PhysFrame::new(FRAME_SIZE, 1));
+        assert_eq!(runs[1], PhysFrame::new(FRAME_SIZE * 3, 2));
+
+        let frame = allocator.allocate().unwrap();
+        allocator.free(frame).unwrap();
+
+        allocator
+            .reserve(ReservedRegion {
+                start: FRAME_SIZE * 3,
+                end: FRAME_SIZE * 4,
+            })
+            .unwrap();
+        let mut remaining: Vec<_> = allocator.free_regions().collect();
+        remaining.sort_by_key(|frame| frame.start);
+        assert_eq!(remaining.len(), 2);
+        assert_eq!(remaining[0], PhysFrame::new(FRAME_SIZE, 1));
+        assert_eq!(remaining[1], PhysFrame::new(FRAME_SIZE * 4, 1));
+    }
+
+    #[test]
+    fn align_helpers_behave_as_expected() {
+        assert_eq!(align_down(FRAME_SIZE * 3 + 123), FRAME_SIZE * 3);
+        assert_eq!(align_up(FRAME_SIZE * 3 + 1), FRAME_SIZE * 4);
+        assert_eq!(span_end(FRAME_SIZE, 2), Some(FRAME_SIZE * 3));
+    }
+}

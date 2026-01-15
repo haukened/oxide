@@ -230,3 +230,128 @@ impl<'a> UsableFrameIter<'a> {
         (next_start < range_end).then_some(next_start)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    extern crate alloc;
+
+    use super::*;
+    use crate::memory::error::FrameAllocError;
+    use alloc::{boxed::Box, vec, vec::Vec};
+    use oxide_abi::{EfiMemoryType, MemoryDescriptor, MemoryMap};
+
+    fn descriptor(typ: EfiMemoryType, physical_start: u64, pages: u64) -> MemoryDescriptor {
+        MemoryDescriptor {
+            typ: typ as u32,
+            _pad: 0,
+            physical_start,
+            virtual_start: 0,
+            number_of_pages: pages,
+            attribute: 0,
+        }
+    }
+
+    fn build_map(descriptors: Vec<MemoryDescriptor>) -> (MemoryMap, Box<[MemoryDescriptor]>) {
+        let entry_size = core::mem::size_of::<MemoryDescriptor>() as u32;
+        let entry_count = descriptors.len() as u32;
+        let backing: Box<[MemoryDescriptor]> = descriptors.into_boxed_slice();
+        let map = MemoryMap {
+            descriptors_phys: backing.as_ptr() as u64,
+            map_size: (entry_size as u64) * (entry_count as u64),
+            entry_size,
+            entry_version: 1,
+            entry_count,
+        };
+
+        (map, backing)
+    }
+
+    #[test]
+    fn alloc_returns_frames_in_sequence() {
+        let descriptors = vec![descriptor(EfiMemoryType::ConventionalMemory, FRAME_SIZE, 3)];
+        let (map, _backing) = build_map(descriptors);
+        let mut allocator = FrameAllocator::new(&map);
+
+        assert_eq!(allocator.alloc(), Some(FRAME_SIZE));
+        assert_eq!(allocator.alloc(), Some(FRAME_SIZE * 2));
+        assert_eq!(allocator.alloc(), Some(FRAME_SIZE * 3));
+        assert_eq!(allocator.alloc(), None);
+    }
+
+    #[test]
+    fn alloc_skips_non_conventional_regions() {
+        let descriptors = vec![
+            descriptor(EfiMemoryType::LoaderCode, FRAME_SIZE, 2),
+            descriptor(EfiMemoryType::ConventionalMemory, FRAME_SIZE * 5, 1),
+        ];
+        let (map, _backing) = build_map(descriptors);
+        let mut allocator = FrameAllocator::new(&map);
+
+        assert_eq!(allocator.alloc(), Some(FRAME_SIZE * 5));
+        assert_eq!(allocator.alloc(), None);
+    }
+
+    #[test]
+    fn alloc_contiguous_returns_run_start() {
+        let descriptors = vec![descriptor(EfiMemoryType::ConventionalMemory, FRAME_SIZE, 4)];
+        let (map, _backing) = build_map(descriptors);
+        let mut allocator = FrameAllocator::new(&map);
+
+        assert_eq!(allocator.alloc_contiguous(2), Ok(FRAME_SIZE));
+        assert_eq!(allocator.alloc(), Some(FRAME_SIZE * 3));
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "frame_count > 0")]
+    fn alloc_contiguous_rejects_zero_request() {
+        let descriptors = vec![descriptor(EfiMemoryType::ConventionalMemory, FRAME_SIZE, 1)];
+        let (map, _backing) = build_map(descriptors);
+        let mut allocator = FrameAllocator::new(&map);
+
+        let _ = allocator.alloc_contiguous(0);
+    }
+
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn alloc_contiguous_rejects_zero_request() {
+        let descriptors = vec![descriptor(EfiMemoryType::ConventionalMemory, FRAME_SIZE, 1)];
+        let (map, _backing) = build_map(descriptors);
+        let mut allocator = FrameAllocator::new(&map);
+
+        assert_eq!(
+            allocator.alloc_contiguous(0),
+            Err(FrameAllocError::InvalidRequest)
+        );
+    }
+
+    #[test]
+    fn alloc_contiguous_detects_gaps() {
+        let descriptors = vec![
+            descriptor(EfiMemoryType::ConventionalMemory, FRAME_SIZE, 2),
+            descriptor(EfiMemoryType::ConventionalMemory, FRAME_SIZE * 5, 2),
+        ];
+        let (map, _backing) = build_map(descriptors);
+        let mut allocator = FrameAllocator::new(&map);
+
+        assert_eq!(
+            allocator.alloc_contiguous(3),
+            Err(FrameAllocError::NonContiguous {
+                expected: FRAME_SIZE * 3,
+                found: FRAME_SIZE * 5,
+            })
+        );
+    }
+
+    #[test]
+    fn alloc_contiguous_reports_out_of_frames() {
+        let descriptors = vec![descriptor(EfiMemoryType::ConventionalMemory, FRAME_SIZE, 2)];
+        let (map, _backing) = build_map(descriptors);
+        let mut allocator = FrameAllocator::new(&map);
+
+        assert_eq!(
+            allocator.alloc_contiguous(4),
+            Err(FrameAllocError::OutOfFrames)
+        );
+    }
+}
