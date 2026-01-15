@@ -143,3 +143,27 @@ fn human_readable_hz(freq_hz: u64) -> (f64, &'static str) {
         (freq, "Hz")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::human_readable_hz;
+
+    #[test]
+    fn test_human_readable_hz() {
+        let (freq, unit) = human_readable_hz(3_200_000_000);
+        assert_eq!(freq, 3.2);
+        assert_eq!(unit, "GHz");
+
+        let (freq, unit) = human_readable_hz(1_500_000);
+        assert_eq!(freq, 1.5);
+        assert_eq!(unit, "MHz");
+
+        let (freq, unit) = human_readable_hz(750_000);
+        assert_eq!(freq, 750.0);
+        assert_eq!(unit, "kHz");
+
+        let (freq, unit) = human_readable_hz(500);
+        assert_eq!(freq, 500.0);
+        assert_eq!(unit, "Hz");
+    }
+}
