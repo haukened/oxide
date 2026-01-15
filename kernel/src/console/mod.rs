@@ -492,3 +492,90 @@ impl Timestamp {
         is_nanos: false,
     };
 }
+
+#[cfg(test)]
+mod tests {
+    extern crate alloc;
+
+    use super::*;
+    use alloc::boxed::Box;
+
+    #[test]
+    fn timestamp_zero_formatting() {
+        let mut buf = [0u8; TIMESTAMP_PREFIX_MAX];
+        let len = format_timestamp_prefix(&mut buf, Timestamp::ZERO);
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], b"[0] ");
+    }
+
+    #[test]
+    fn timestamp_nanos_formatting() {
+        let mut buf = [0u8; TIMESTAMP_PREFIX_MAX];
+        let ts = Timestamp {
+            value: 12_345_678_901,
+            is_nanos: true,
+        };
+        let len = format_timestamp_prefix(&mut buf, ts);
+        assert_eq!(&buf[..len], b"[12.345678] ");
+    }
+
+    #[test]
+    fn timestamp_ticks_formatting() {
+        let mut buf = [0u8; TIMESTAMP_PREFIX_MAX];
+        let ts = Timestamp {
+            value: 987_654,
+            is_nanos: false,
+        };
+        let len = format_timestamp_prefix(&mut buf, ts);
+        assert_eq!(&buf[..len], b"[987654] ");
+    }
+
+    #[test]
+    fn line_buffer_push_and_clear() {
+        let mut buffer = LineBuffer::new();
+        buffer.push(b'A');
+        buffer.push(b'B');
+        assert_eq!(buffer.len(), 2);
+        assert_eq!(buffer.as_slice(), b"AB");
+        buffer.clear();
+        assert_eq!(buffer.len(), 0);
+        assert_eq!(buffer.as_slice(), b"");
+    }
+
+    #[test]
+    fn line_buffer_extend_respects_capacity() {
+        let mut buffer = LineBuffer::new();
+        let large_input = [b'X'; MAX_LINE_CHARS + 10];
+        buffer.extend_from_slice(&large_input);
+        assert_eq!(buffer.len(), MAX_LINE_CHARS);
+        assert!(buffer.as_slice().iter().all(|&b| b == b'X'));
+    }
+
+    #[test]
+    fn history_push_wraps_slots() {
+        let slots = Box::new([LineSlot::EMPTY; 4]);
+        let slots: &'static mut [LineSlot; 4] = Box::leak(slots);
+        let mut history = History::new(slots);
+
+        for i in 0..6u8 {
+            history.push(
+                Timestamp {
+                    value: i as u64,
+                    is_nanos: false,
+                },
+                &[i],
+            );
+            let expected_len = (usize::from(i) + 1).min(4);
+            assert_eq!(history.len, expected_len);
+        }
+
+        assert_eq!(history.start, 2);
+        let capacity = history.slots.len();
+        let mut collected = [0u8; 4];
+        for idx in 0..history.len {
+            let slot_index = (history.start + idx) % capacity;
+            collected[idx] = history.slots[slot_index].data[0];
+        }
+        assert_eq!(&collected, b"");
+    }
+}
