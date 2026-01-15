@@ -591,6 +591,82 @@ mod tests {
     }
 
     #[test]
+    fn install_gate_sets_present_bit() {
+        let mut idt = super::Idt::new();
+        let selector = 0x0030u16;
+        let options = super::GateOptions::interrupt().with_present(false);
+
+        super::install_gate(&mut idt, 0x40, dummy_handler, selector, options);
+
+        let entry = idt.entries[0x40];
+        let super::IdtEntry {
+            selector: actual_selector,
+            type_attr,
+            ..
+        } = entry;
+        assert_eq!(actual_selector, selector);
+        assert_ne!(type_attr & 0b1000_0000, 0);
+    }
+
+    #[test]
+    fn configure_exceptions_installs_expected_vectors() {
+        let mut idt = super::Idt::new();
+        let selector = 0x0040u16;
+        super::configure_exceptions(&mut idt, selector);
+
+        let expected = [
+            (0x00u8, super::GateOptions::interrupt()),
+            (0x03u8, super::GateOptions::trap()),
+            (0x06u8, super::GateOptions::interrupt()),
+            (0x08u8, super::GateOptions::interrupt()),
+            (0x0Du8, super::GateOptions::interrupt()),
+            (0x0Eu8, super::GateOptions::interrupt()),
+        ];
+
+        for (vector, opts) in expected {
+            let entry = idt.entries[vector as usize];
+            let super::IdtEntry {
+                selector: actual_selector,
+                type_attr,
+                offset_low,
+                offset_mid,
+                offset_high,
+                ..
+            } = entry;
+            assert_eq!(actual_selector, selector);
+            assert_eq!(type_attr, opts.type_attr);
+            assert!(offset_low != 0 || offset_mid != 0 || offset_high != 0);
+        }
+    }
+
+    #[test]
+    fn configure_irqs_installs_expected_vectors() {
+        let mut idt = super::Idt::new();
+        let selector = 0x0050u16;
+        super::configure_irqs(&mut idt, selector);
+
+        let expected = [
+            (0x20u8, super::GateOptions::interrupt()),
+            (0x21u8, super::GateOptions::interrupt()),
+        ];
+
+        for (vector, opts) in expected {
+            let entry = idt.entries[vector as usize];
+            let super::IdtEntry {
+                selector: actual_selector,
+                type_attr,
+                offset_low,
+                offset_mid,
+                offset_high,
+                ..
+            } = entry;
+            assert_eq!(actual_selector, selector);
+            assert_eq!(type_attr, opts.type_attr);
+            assert!(offset_low != 0 || offset_mid != 0 || offset_high != 0);
+        }
+    }
+
+    #[test]
     fn sanity_test() {
         // this should unconditionally pass
         assert_eq!(1, 1);
